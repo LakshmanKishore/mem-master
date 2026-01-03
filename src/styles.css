@@ -1,0 +1,185 @@
+:root {
+  --bg-color: #f0f4f8;
+  --card-bg: #ffffff;
+  --card-back-bg: #6366f1;
+  --card-wrong-bg: #ef4444;
+  --text-color: #1e293b;
+  --highlight-color: #3b82f6;
+  --shadow-color: rgba(0, 0, 0, 0.1);
+  --shadow-boxy: 4px 4px 0px rgba(0, 0, 0, 0.2);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+  background-color: var(--bg-color);
+  color: var(--text-color);
+  overflow: hidden;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+main {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: space-between;
+  height: 100%;
+  padding: 20px;
+  max-width: 600px;
+  margin: 0 auto;
+}
+
+/* Sequence Bar */
+#sequence {
+  display: flex;
+  justify-content: center;
+  gap: 8px;
+  margin-bottom: 20px;
+  padding: 10px;
+  background: white;
+  border-radius: 12px;
+  box-shadow: var(--shadow-boxy);
+  width: 100%;
+}
+
+.seq-item {
+  font-size: 1.5rem;
+  opacity: 0.3;
+  transition: all 0.3s ease;
+  filter: grayscale(100%);
+}
+
+.seq-item.found {
+  opacity: 1;
+  filter: grayscale(0%);
+}
+
+.seq-item.target {
+  opacity: 1;
+  transform: scale(1.3);
+  filter: drop-shadow(0 0 5px var(--highlight-color));
+}
+
+/* Board */
+#board {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 15px;
+  width: 100%;
+  aspect-ratio: 1;
+  padding: 10px;
+}
+
+.card {
+  background-color: transparent;
+  width: 100%;
+  height: 100%;
+  perspective: 1000px;
+  cursor: pointer;
+}
+
+.card-inner {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  text-align: center;
+  transition: transform 0.6s;
+  transform-style: preserve-3d;
+  border-radius: 12px;
+  box-shadow: var(--shadow-boxy);
+}
+
+.card.flipped .card-inner {
+  transform: rotateY(180deg);
+  box-shadow: inset 2px 2px 5px rgba(0,0,0,0.1); /* Pressed look? */
+}
+
+/* Front and Back */
+.card-front, .card-back {
+  position: absolute;
+  width: 100%;
+  height: 100%;
+  -webkit-backface-visibility: hidden;
+  backface-visibility: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 3rem;
+  border-radius: 12px;
+  border: 2px solid #e2e8f0;
+}
+
+.card-front {
+  background-color: var(--card-bg);
+  color: var(--highlight-color);
+  font-weight: bold;
+}
+
+.card-back {
+  background-color: var(--card-bg); /* Use white for better emoji visibility */
+  transform: rotateY(180deg);
+}
+
+.card.wrong .card-back {
+  background-color: var(--card-wrong-bg);
+  border-color: #b91c1c;
+}
+
+/* Players */
+#playersSection {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 15px;
+  list-style: none;
+  padding: 0;
+  width: 100%;
+  margin-top: 20px;
+}
+
+#playersSection li {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  opacity: 0.6;
+  transition: opacity 0.3s;
+  text-align: center;
+}
+
+#playersSection li.active-turn {
+  opacity: 1;
+}
+
+.avatar-container {
+  width: 50px;
+  height: 50px;
+  border-radius: 50%;
+  overflow: hidden;
+  border: 3px solid transparent;
+  transition: border-color 0.3s;
+}
+
+#playersSection li.active-turn .avatar-container {
+  border-color: var(--highlight-color);
+  box-shadow: 0 0 10px var(--highlight-color);
+}
+
+#playersSection img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.name {
+  font-size: 0.8rem;
+  margin-top: 4px;
+}
