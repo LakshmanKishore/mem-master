@@ -1,41 +1,30 @@
 import type { PlayerId, RuneClient } from "rune-sdk"
 
 const EMOJIS = [
-  "🐶",
-  "🐱",
-  "🐭",
-  "🐹",
-  "🐰",
-  "🦊",
-  "🐻",
-  "🐼",
-  "🐨",
-  "🐯",
-  "🦁",
-  "🐮",
-  "🐷",
-  "🐸",
-  "🐵",
-  "🐔",
-  "🐧",
-  "🐦",
-  "🐤",
-  "🦆",
+  "🐶", "🐱", "🐭", "🐹", "🐰", "🦊", "🐻", "🐼", "🐨", "🐯",
+  "🦁", "🐮", "🐷", "🐸", "🐵", "🐔", "🐧", "🐦", "🐤", "🦆",
 ]
 
 export interface GameState {
-  sequence: string[]
-  board: string[]
-  revealed: boolean[]
-  currentStep: number
   playerIds: PlayerId[]
   turn: PlayerId
-  lastWrongMove: { cardIndex: number; player: PlayerId } | null
+  phase: "draw" | "pick"
+  deck: string[]
+  centerCards: (string | null)[] // 9 slots, can be null
+  playerHands: Record<PlayerId, string[]>
+  currentDrawnCard: string | null
+  lastResult: {
+    success: boolean
+    emoji: string
+    from: { type: "center"; index: number } | { type: "player"; playerId: PlayerId; index: number }
+    to?: PlayerId | "center"
+  } | null
   winner: PlayerId | null
 }
 
 type GameActions = {
-  flipCard: (cardIndex: number) => void
+  drawCard: () => void
+  pickCard: (target: { type: "center"; index: number } | { type: "player"; playerId: PlayerId; index: number }) => void
 }
 
 declare global {
@@ -51,21 +40,33 @@ function shuffle<T>(array: T[]): T[] {
   return newArray
 }
 
-function generateGame(playerIds: PlayerId[]) {
+function generateGame(playerIds: PlayerId[]): GameState {
   const gameEmojis = shuffle(EMOJIS).slice(0, 9)
-  // sequence is the order they must be found
-  const sequence = [...gameEmojis]
-  // board is the physical location (shuffled)
-  const board = shuffle(gameEmojis)
+  
+  // Center starts with 9 cards
+  const centerCards = [...gameEmojis]
+  
+  // Deck count scales
+  const deckSize = 10 + playerIds.length * 5
+  const deck: string[] = []
+  for (let i = 0; i < deckSize; i++) {
+    deck.push(gameEmojis[Math.floor(Math.random() * gameEmojis.length)])
+  }
+
+  const playerHands: Record<PlayerId, string[]> = {}
+  playerIds.forEach(id => {
+    playerHands[id] = []
+  })
 
   return {
-    sequence,
-    board,
-    revealed: new Array(9).fill(false),
-    currentStep: 0,
     playerIds,
     turn: playerIds[0],
-    lastWrongMove: null,
+    phase: "draw",
+    deck,
+    centerCards,
+    playerHands,
+    currentDrawnCard: null,
+    lastResult: null,
     winner: null,
   }
 }
@@ -75,68 +76,128 @@ Rune.initLogic({
   maxPlayers: 6,
   setup: (allPlayerIds) => generateGame(allPlayerIds),
   actions: {
-    flipCard: (cardIndex, { game, playerId }) => {
-      if (game.winner || game.revealed[cardIndex] || game.turn !== playerId) {
+    drawCard: (_, { game, playerId }) => {
+      if (game.phase !== "draw" || game.turn !== playerId || game.deck.length === 0) {
+        return
+      }
+      game.currentDrawnCard = game.deck.pop() || null
+      game.phase = "pick"
+      game.lastResult = null
+    },
+    pickCard: (target, { game, playerId }) => {
+      if (game.phase !== "pick" || game.turn !== playerId) {
         return
       }
 
-      // Clear previous wrong move state on new valid action
-      game.lastWrongMove = null
-
-      const clickedEmoji = game.board[cardIndex]
-      const targetEmoji = game.sequence[game.currentStep]
-
-      if (clickedEmoji === targetEmoji) {
-        // Correct guess
-        game.revealed[cardIndex] = true
-        game.currentStep++
-
-        if (game.currentStep === 9) {
-          game.winner = playerId
-          Rune.gameOver({
-            players: {
-              [playerId]: "WON",
-              ...Object.fromEntries(
-                game.playerIds
-                  .filter((id) => id !== playerId)
-                  .map((id) => [id, "LOST"])
-              ),
-            },
-          })
-        }
-        // Player keeps turn on success
+      let pickedEmoji: string | null = null
+      
+      if (target.type === "center") {
+        pickedEmoji = game.centerCards[target.index]
       } else {
-        // Wrong guess
-        game.lastWrongMove = { cardIndex, player: playerId }
+        const targetHand = game.playerHands[target.playerId]
+        pickedEmoji = targetHand ? targetHand[target.index] : null
+      }
 
-        // Reset progress on failure
-        game.revealed.fill(false)
-        game.currentStep = 0
+      if (!pickedEmoji) return
 
-        // Pass turn
+      const isMatch = pickedEmoji === game.currentDrawnCard
+      
+      if (isMatch) {
+        // SUCCESS: Card goes to current player
+        if (target.type === "center") {
+          game.centerCards[target.index] = null
+        } else {
+          game.playerHands[target.playerId].splice(target.index, 1)
+          // Shuffle the target player's hand since they lost a card
+          game.playerHands[target.playerId] = shuffle(game.playerHands[target.playerId])
+        }
+        
+        game.playerHands[playerId].push(pickedEmoji)
+        game.playerHands[playerId] = shuffle(game.playerHands[playerId])
+        
+        game.lastResult = {
+          success: true,
+          emoji: pickedEmoji,
+          from: target,
+          to: playerId
+        }
+      } else {
+        // FAIL: If it was a player's card, it goes back to "the level" (center)
+        if (target.type === "player") {
+          const emoji = game.playerHands[target.playerId].splice(target.index, 1)[0]
+          
+          // Find first empty slot in center
+          let emptyIndex = game.centerCards.indexOf(null)
+          if (emptyIndex !== -1) {
+            game.centerCards[emptyIndex] = emoji
+          } else {
+            // Should not really happen with 9 slots and 9 unique emojis, but fallback
+            game.centerCards.push(emoji)
+            emptyIndex = game.centerCards.length - 1
+          }
+
+          game.playerHands[target.playerId] = shuffle(game.playerHands[target.playerId])
+          
+          game.lastResult = {
+            success: false,
+            emoji: pickedEmoji,
+            from: target,
+            to: "center"
+          }
+        } else {
+          // Failed center guess just ends turn
+          game.lastResult = {
+            success: false,
+            emoji: pickedEmoji,
+            from: target
+          }
+        }
+      }
+
+      // Check for game over
+      if (game.deck.length === 0) {
+        const winners = game.playerIds.filter(id => {
+          const score = game.playerHands[id].length
+          const maxScore = Math.max(...game.playerIds.map(pid => game.playerHands[pid].length))
+          return score === maxScore
+        })
+
+        if (winners.length === 1) game.winner = winners[0]
+        
+        Rune.gameOver({
+          players: Object.fromEntries(
+            game.playerIds.map(id => [id, winners.includes(id) ? "WON" : "LOST"])
+          )
+        })
+      } else {
         const currentIndex = game.playerIds.indexOf(playerId)
-        const nextIndex = (currentIndex + 1) % game.playerIds.length
-        game.turn = game.playerIds[nextIndex]
+        game.turn = game.playerIds[(currentIndex + 1) % game.playerIds.length]
+        game.phase = "draw"
+        game.currentDrawnCard = null
       }
     },
   },
   events: {
     playerJoined: (playerId, { game }) => {
       game.playerIds.push(playerId)
+      game.playerHands[playerId] = []
     },
     playerLeft: (playerId, { game }) => {
+      const hand = game.playerHands[playerId] || []
+      hand.forEach(emoji => {
+        const nullIndex = game.centerCards.indexOf(null)
+        if (nullIndex !== -1) game.centerCards[nullIndex] = emoji
+        else game.centerCards.push(emoji)
+      })
+      delete game.playerHands[playerId]
+
       const playerIndex = game.playerIds.indexOf(playerId)
-      if (playerIndex === -1) return
-
-      game.playerIds.splice(playerIndex, 1)
-
-      // If the current turn player left, pass to next
-      if (game.turn === playerId) {
-        // The index we just removed is now occupied by the next player (or we need to wrap)
-        // Since splice shifted elements, playerIds[playerIndex] is the next player.
-        // We just need to handle wrap around if they were the last one.
-        if (game.playerIds.length > 0) {
+      if (playerIndex !== -1) {
+        game.playerIds.splice(playerIndex, 1)
+        if (game.turn === playerId && game.playerIds.length > 0) {
           game.turn = game.playerIds[playerIndex % game.playerIds.length]
+          game.phase = "draw"
+          game.currentDrawnCard = null
         }
       }
     },
