@@ -30,26 +30,19 @@ function initUI(game: GameState) {
   guessCardElements = []
   playerNodes = {}
 
-  // 1. Create Deck layers for 3D depth
-  deckStack.innerHTML = `
-    <div class="deck-layer"></div>
-    <div class="deck-layer"></div>
-    <div class="deck-layer"></div>
-    <div class="deck-top">🎴</div>
-  `
-
-  // 2. Create 9 Guess Cards in a Circle
-  const radius = 150
+  // 1. Create 9 Guess Cards in a Circle (Inner Ring)
+  // Radius is 25% of the 95vmin container
+  const cardRadius = 25 
   for (let i = 0; i < 9; i++) {
     const angle = (i * 360) / 9
-    const x = radius * Math.cos((angle - 90) * (Math.PI / 180))
-    const y = radius * Math.sin((angle - 90) * (Math.PI / 180))
+    const x = 50 + cardRadius * Math.cos((angle - 90) * (Math.PI / 180))
+    const y = 50 + cardRadius * Math.sin((angle - 90) * (Math.PI / 180))
 
     const card = document.createElement("div")
     card.className = "guess-card"
-    card.style.left = `calc(50% + ${x}px)`
-    card.style.top = `calc(50% + ${y}px)`
-    card.style.setProperty("--base-rotate", `${angle}deg`)
+    card.style.left = `${x}%`
+    card.style.top = `${y}%`
+    card.style.transform = `translate(-50%, -50%) rotate(${angle}deg)`
     
     card.innerHTML = `
       <div class="card-inner">
@@ -62,16 +55,17 @@ function initUI(game: GameState) {
     guessCardElements.push(card)
   }
 
-  // 3. Create Players around the edge
+  // 2. Create Players Ring (Outer Ring)
+  // Radius is 45% of the 95vmin container (just inside edge)
+  const playerRadius = 45
   game.playerIds.forEach((id, index) => {
     const info = Rune.getPlayerInfo(id)
     const node = document.createElement("div")
     node.className = "player-node"
     
     const angle = (index * 360) / game.playerIds.length
-    const dist = 43
-    const x = 50 + dist * Math.cos((angle - 90) * (Math.PI / 180))
-    const y = 50 + dist * Math.sin((angle - 90) * (Math.PI / 180))
+    const x = 50 + playerRadius * Math.cos((angle - 90) * (Math.PI / 180))
+    const y = 50 + playerRadius * Math.sin((angle - 90) * (Math.PI / 180))
     
     node.style.left = `${x}%`
     node.style.top = `${y}%`
@@ -81,37 +75,43 @@ function initUI(game: GameState) {
       <div class="avatar-wrapper">
         <img class="avatar-image" src="${info.avatarUrl}" />
       </div>
-      <div class="player-info">
-        <div class="player-name">${info.displayName}</div>
-        <div class="card-count">0 CARDS</div>
-      </div>
-      <div class="player-cards" style="display:flex; gap:3px; margin-top:5px; height:20px;"></div>
+      <div class="player-name">${info.displayName}</div>
+      <div class="player-cards"></div>
     `
     playersRing.appendChild(node)
     playerNodes[id] = node
   })
 
+  // Deck visual setup
+  deckStack.innerHTML = `<div class="deck-top">🎴</div>`
   deckStack.onclick = () => Rune.actions.drawCard()
 }
 
 // --- Particles VFX ---
 function spawnParticles(x: number, y: number, color: string) {
-  for (let i = 0; i < 15; i++) {
+  for (let i = 0; i < 12; i++) {
     const p = document.createElement("div")
-    p.className = "particle"
+    p.style.position = "fixed"
+    p.style.pointerEvents = "none"
+    p.style.zIndex = "1000"
     p.style.background = color
-    p.style.width = `${Math.random() * 8 + 4}px`
+    p.style.borderRadius = "50%"
+    p.style.width = `${Math.random() * 8 + 6}px`
     p.style.height = p.style.width
     p.style.left = `${x}px`
     p.style.top = `${y}px`
     
-    const tx = (Math.random() - 0.5) * 200
-    const ty = (Math.random() - 0.5) * 200
-    p.style.setProperty("--tx", `${tx}px`)
-    p.style.setProperty("--ty", `${ty}px`)
+    const angle = Math.random() * Math.PI * 2
+    const speed = Math.random() * 100 + 50
+    const tx = Math.cos(angle) * speed
+    const ty = Math.sin(angle) * speed
+    
+    p.animate([
+      { transform: `translate(0, 0) scale(1)`, opacity: 1 },
+      { transform: `translate(${tx}px, ${ty}px) scale(0)`, opacity: 0 }
+    ], { duration: 600, easing: 'ease-out' }).onfinish = () => p.remove()
     
     document.body.appendChild(p)
-    setTimeout(() => p.remove(), 800)
   }
 }
 
@@ -120,28 +120,23 @@ function spawnParticles(x: number, y: number, color: string) {
 function updateUI(game: GameState, yourPlayerId: PlayerId | undefined) {
   const isMyTurn = game.turn === yourPlayerId
 
-  // Determine Status Text
-  let statusText = ""
-  if (game.winner) {
-    statusText = "🏆 GAME OVER!"
-  } else if (isMyTurn) {
-    statusText = game.phase === "draw" ? "DRAW A CARD!" : `FIND ${game.currentDrawnCard}!`
-  } else {
-    statusText = "WAITING..."
-  }
-
-  // Update Turn Indicator (Merged with Status)
+  // Status & Turn
   const turnPlayer = Rune.getPlayerInfo(game.turn)
+  let statusText = ""
+  if (game.winner) statusText = "WINNER!"
+  else if (isMyTurn) statusText = game.phase === "draw" ? "DRAW!" : `FIND ${game.currentDrawnCard}!`
+  else statusText = "WAITING..."
+
   turnIndicator.innerHTML = `
     <img src="${turnPlayer.avatarUrl}" />
-    <div class="turn-text-group">
-      <div class="turn-player-name">${isMyTurn ? "YOUR TURN" : turnPlayer.displayName + "'S TURN"}</div>
+    <div>
+      <div class="turn-player-name">${isMyTurn ? "YOU" : turnPlayer.displayName}</div>
       <div class="turn-action-text">${statusText}</div>
     </div>
   `
   turnIndicator.classList.toggle("my-turn", isMyTurn)
 
-  // Update Center Cards
+  // Center Cards
   game.centerCards.forEach((emoji, i) => {
     const el = guessCardElements[i]
     if (!el) return
@@ -150,27 +145,40 @@ function updateUI(game: GameState, yourPlayerId: PlayerId | undefined) {
     if (emoji) front.innerText = emoji
   })
 
-  // Update Players
+  // Players & Hands
   game.playerIds.forEach((id) => {
     const node = playerNodes[id]
     if (!node) return
     node.classList.toggle("active-turn", id === game.turn)
     
-    const countEl = node.querySelector(".card-count") as HTMLElement
-    const hand = game.playerHands[id] || []
-    countEl.innerText = `${hand.length} CARDS`
-
     const cardsContainer = node.querySelector(".player-cards") as HTMLElement
+    const hand = game.playerHands[id] || []
+
+    // Re-render hand if count changes
     if (cardsContainer.children.length !== hand.length) {
       cardsContainer.innerHTML = ""
+      const totalCards = hand.length
+      // Calculate Fan Angle
+      const fanSpread = Math.min(totalCards * 15, 60) // Max 60 deg spread
+      const startAngle = -fanSpread / 2
+
       hand.forEach((_, idx) => {
-        const mini = document.createElement("div")
-        mini.className = "mini-card"
-        mini.onclick = (e) => {
+        const card = document.createElement("div")
+        card.className = "hand-card"
+        
+        // Fan Logic
+        const step = totalCards > 1 ? fanSpread / (totalCards - 1) : 0
+        const angle = startAngle + (step * idx)
+        const yOffset = Math.abs(angle) * 0.4
+        
+        card.style.transform = `translateX(-50%) rotate(${angle}deg) translateY(${yOffset}px)`
+        card.style.zIndex = `${idx}`
+
+        card.onclick = (e) => {
           e.stopPropagation()
           Rune.actions.pickCard({ type: "player", playerId: id, index: idx })
         }
-        cardsContainer.appendChild(mini)
+        cardsContainer.appendChild(card)
       })
     }
   })
@@ -207,12 +215,14 @@ function animateAction(game: GameState, action: any) {
           setTimeout(() => sourceEl?.classList.remove("flipped", "shake"), 1000)
         } else {
           const rect = sourceEl.getBoundingClientRect()
-          spawnParticles(rect.left + rect.width/2, rect.top + rect.height/2, "#22c55e")
+          spawnParticles(rect.left + rect.width/2, rect.top + rect.height/2, "#4ade80")
         }
       }
     } else {
+      // Animate from player hand
       const node = playerNodes[res.from.playerId]
-      sourceEl = node?.querySelector(".avatar-wrapper") as HTMLElement
+      const handContainer = node?.querySelector(".player-cards")
+      sourceEl = handContainer?.children[res.from.index] as HTMLElement
     }
 
     if (res.success || res.to === "center") {
@@ -237,33 +247,22 @@ function flyCard(emoji: string, from: {x:number, y:number}, to: {x:number, y:num
   const fly = document.createElement("div")
   fly.className = "flying-card"
   fly.innerText = emoji
-  fly.style.background = "white"
-  fly.style.borderRadius = "8px"
-  fly.style.width = "60px"
-  fly.style.height = "80px"
-  fly.style.display = "flex"
-  fly.style.alignItems = "center"
-  fly.style.justifyContent = "center"
-  fly.style.fontSize = "30px"
-  fly.style.position = "fixed"
-  fly.style.boxShadow = "0 10px 30px rgba(0,0,0,0.5)"
-  if (success) fly.style.border = "3px solid #22c55e"
+  fly.style.border = success ? "4px solid #4ade80" : "4px solid white"
   
   fly.style.left = `${from.x}px`
   fly.style.top = `${from.y}px`
   document.body.appendChild(fly)
 
-  fly.offsetHeight // reflow
-  fly.style.transition = "all 0.7s cubic-bezier(0.34, 1.56, 0.64, 1)"
-  fly.style.left = `${to.x}px`
-  fly.style.top = `${to.y}px`
-  fly.style.transform = "translate(-50%, -50%) scale(0.2) rotate(720deg)"
-  fly.style.opacity = "0"
+  // Force reflow
+  fly.offsetHeight
 
-  setTimeout(() => {
-    if (success) spawnParticles(to.x, to.y, "#8b5cf6")
+  fly.animate([
+    { transform: `translate(-50%, -50%) scale(1) rotate(0deg)`, left: `${from.x}px`, top: `${from.y}px` },
+    { transform: `translate(-50%, -50%) scale(0.5) rotate(360deg)`, left: `${to.x}px`, top: `${to.y}px` }
+  ], { duration: 600, easing: "cubic-bezier(0.34, 1.56, 0.64, 1)" }).onfinish = () => {
+    if (success) spawnParticles(to.x, to.y, "#facc15")
     fly.remove()
-  }, 700)
+  }
 }
 
 Rune.initClient({

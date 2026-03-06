@@ -10,33 +10,37 @@
   </head>
   <body>
     <main>
-      <div id="game-container">
+      <!-- Move UI outside the 3D container so it always works -->
+      <div id="ui-layer">
         <div id="turn-indicator"></div>
+        <button id="help-btn">?</button>
+        <div id="status-toast"></div>
+      </div>
+
+      <div id="game-container">
         <div id="table-surface"></div>
         
+        <!-- Full screen rings for proper spacing -->
+        <div id="guess-cards-ring"></div>
         <div id="players-ring"></div>
 
-        <div id="gameplay-area">
-          <div id="deck-stack">
-            <div class="deck-top">🎴</div>
-          </div>
-          <div id="guess-cards-ring"></div>
+        <!-- Center Deck -->
+        <div id="deck-stack">
+          <div class="deck-top">🎴</div>
         </div>
 
         <div id="drawn-reveal-container"></div>
-        
-        <div id="status-toast"></div>
+      </div>
 
-        <button id="help-btn">?</button>
-        <div id="help-overlay" class="hidden">
-          <div class="help-modal">
-            <h2>How to Play</h2>
-            <p><strong>1. Draw:</strong> Click the center deck to reveal a target emoji.</p>
-            <p><strong>2. Guess:</strong> Find that emoji! It could be in the <strong>9 center cards</strong> or in a <strong>Player's Hand</strong>.</p>
-            <p><strong>3. Steal:</strong> Guess correctly to take the card from the center or steal from a player!</p>
-            <p><strong>4. Risk:</strong> Wrong guesses on a player's hand return that card to the center.</p>
-            <button id="close-help">Got it!</button>
-          </div>
+      <!-- Overlays -->
+      <div id="help-overlay" class="hidden">
+        <div class="help-modal">
+          <h2>How to Play</h2>
+          <p><strong>1. Draw:</strong> Click the center deck to reveal a target emoji.</p>
+          <p><strong>2. Guess:</strong> Find that emoji! It could be in the <strong>Center Circle</strong> or in a <strong>Player's Hand</strong>.</p>
+          <p><strong>3. Steal:</strong> Guess correctly to take the card!</p>
+          <p><strong>4. Risk:</strong> Wrong guesses return the card to the center.</p>
+          <button id="close-help">Got it!</button>
         </div>
       </div>
     </main>
@@ -49,34 +53,17 @@
           doc.__octaStarInterceptorSet = true;
 
           doc.addEventListener('click', function(event) {
-            // Identify if the clicked element (or its parent) is the specific 'X' icon
             const icon = event.target.closest('img[src*="M13.4099%2012L17.7099"]');
-
             if (icon) {
               const confirmed = confirm("Are you sure you want to close this?");
-
               if (!confirmed) {
                 event.stopImmediatePropagation();
                 event.preventDefault();
-                console.log("Close action blocked.");
-              } else {
-                console.log("Close action allowed.");
               }
             }
           }, { capture: true });
         };
-
-        // Attach to current document
         setupInterceptor(document);
-
-        // Try to attach to parent document if in an iframe (may be blocked by cross-origin policy)
-        try {
-          if (window.parent && window.parent !== window) {
-            setupInterceptor(window.parent.document);
-          }
-        } catch (e) {
-          // Cross-origin access likely blocked, which is expected in most sandboxed environments
-        }
       })();
     </script>
   </body>
