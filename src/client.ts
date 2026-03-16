@@ -8,31 +8,95 @@ const playersRing = document.getElementById("players-ring")!
 const guessCardsRing = document.getElementById("guess-cards-ring")!
 const deckStack = document.getElementById("deck-stack")!
 const drawnRevealContainer = document.getElementById("drawn-reveal-container")!
+const myHandContainer = document.getElementById("my-hand-container")!
 const turnIndicator = document.getElementById("turn-indicator")!
+const deckCountEl = document.getElementById("deck-count")!
 const helpBtn = document.getElementById("help-btn")!
 const helpOverlay = document.getElementById("help-overlay")!
 const closeHelpBtn = document.getElementById("close-help")!
 
-const selectSound = new Audio(selectSoundAudio)
+// Steal Modal Elements
+const stealOverlay = document.getElementById("steal-overlay")!
+const stealGrid = document.getElementById("steal-grid")!
+const cancelStealBtn = document.getElementById("cancel-steal")!
+
+// --- Audio Synthesizer ---
+const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)()
+
+function playSound(type: "draw" | "success" | "fail" | "steal") {
+  const osc = audioCtx.createOscillator()
+  const gain = audioCtx.createGain()
+
+  osc.connect(gain)
+  gain.connect(audioCtx.destination)
+
+  const now = audioCtx.currentTime
+
+  if (type === "draw") {
+    osc.type = "sine"
+    osc.frequency.setValueAtTime(400, now)
+    osc.frequency.exponentialRampToValueAtTime(800, now + 0.1)
+    gain.gain.setValueAtTime(0.2, now)
+    gain.gain.exponentialRampToValueAtTime(0.01, now + 0.1)
+    osc.start(now)
+    osc.stop(now + 0.1)
+  } else if (type === "success") {
+    osc.type = "sine"
+    osc.frequency.setValueAtTime(600, now)
+    osc.frequency.exponentialRampToValueAtTime(1200, now + 0.2)
+    gain.gain.setValueAtTime(0.3, now)
+    gain.gain.exponentialRampToValueAtTime(0.01, now + 0.3)
+    osc.start(now)
+    osc.stop(now + 0.3)
+  } else if (type === "fail") {
+    osc.type = "sawtooth"
+    osc.frequency.setValueAtTime(200, now)
+    osc.frequency.linearRampToValueAtTime(100, now + 0.2)
+    gain.gain.setValueAtTime(0.1, now)
+    gain.gain.exponentialRampToValueAtTime(0.01, now + 0.3)
+    osc.start(now)
+    osc.stop(now + 0.3)
+  } else if (type === "steal") {
+    osc.type = "square"
+    osc.frequency.setValueAtTime(500, now)
+    osc.frequency.exponentialRampToValueAtTime(300, now + 0.2)
+    gain.gain.setValueAtTime(0.1, now)
+    gain.gain.exponentialRampToValueAtTime(0.01, now + 0.2)
+    osc.start(now)
+    osc.stop(now + 0.2)
+  }
+}
 
 let playerNodes: Record<PlayerId, HTMLElement> = {}
 let guessCardElements: HTMLElement[] = []
 let currentDrawnEmoji: string | null = null
+let lastClickPos: { x: number; y: number } | null = null
+let currentGame: GameState | null = null
 
 // --- Initialization ---
 
 helpBtn.onclick = () => helpOverlay.classList.remove("hidden")
 closeHelpBtn.onclick = () => helpOverlay.classList.add("hidden")
+cancelStealBtn.onclick = () => stealOverlay.classList.add("hidden")
 
-function initUI(game: GameState) {
+// Track global clicks
+document.addEventListener(
+  "click",
+  (e) => {
+    lastClickPos = { x: e.clientX, y: e.clientY }
+    setTimeout(() => (lastClickPos = null), 100)
+  },
+  true
+)
+
+function initUI(game: GameState, yourPlayerId: PlayerId | undefined) {
   playersRing.innerHTML = ""
   guessCardsRing.innerHTML = ""
   guessCardElements = []
   playerNodes = {}
 
-  // 1. Create 9 Guess Cards in a Circle (Inner Ring)
-  // Radius is 25% of the 95vmin container
-  const cardRadius = 25 
+  // 1. Create 9 Guess Cards
+  const cardRadius = 25
   for (let i = 0; i < 9; i++) {
     const angle = (i * 360) / 9
     const x = 50 + cardRadius * Math.cos((angle - 90) * (Math.PI / 180))
@@ -43,7 +107,7 @@ function initUI(game: GameState) {
     card.style.left = `${x}%`
     card.style.top = `${y}%`
     card.style.transform = `translate(-50%, -50%) rotate(${angle}deg)`
-    
+
     card.innerHTML = `
       <div class="card-inner">
         <div class="card-face back"></div>
@@ -56,17 +120,19 @@ function initUI(game: GameState) {
   }
 
   // 2. Create Players Ring (Outer Ring)
-  // Radius is 45% of the 95vmin container (just inside edge)
   const playerRadius = 45
   game.playerIds.forEach((id, index) => {
     const info = Rune.getPlayerInfo(id)
+    if (!info) return
+
+    const isMe = id === yourPlayerId
     const node = document.createElement("div")
-    node.className = "player-node"
-    
+    node.className = `player-node ${isMe ? "is-me" : ""}`
+
     const angle = (index * 360) / game.playerIds.length
     const x = 50 + playerRadius * Math.cos((angle - 90) * (Math.PI / 180))
     const y = 50 + playerRadius * Math.sin((angle - 90) * (Math.PI / 180))
-    
+
     node.style.left = `${x}%`
     node.style.top = `${y}%`
     node.style.transform = `translate(-50%, -50%)`
@@ -74,117 +140,175 @@ function initUI(game: GameState) {
     node.innerHTML = `
       <div class="avatar-wrapper">
         <img class="avatar-image" src="${info.avatarUrl}" />
+        <div class="score-badge">0</div>
+        <div class="player-cards"></div>
       </div>
       <div class="player-name">${info.displayName}</div>
-      <div class="player-cards"></div>
     `
+
+    if (!isMe) {
+      node.onclick = () => {
+        if (!currentGame) return
+        const hand = currentGame.playerHands[id] || []
+        if (hand.length >= 1) {
+          openStealModal(id, hand.length, hand)
+        }
+      }
+    }
+
     playersRing.appendChild(node)
     playerNodes[id] = node
   })
 
-  // Deck visual setup
   deckStack.innerHTML = `<div class="deck-top">🎴</div>`
   deckStack.onclick = () => Rune.actions.drawCard()
 }
 
-// --- Particles VFX ---
-function spawnParticles(x: number, y: number, color: string) {
-  for (let i = 0; i < 12; i++) {
-    const p = document.createElement("div")
-    p.style.position = "fixed"
-    p.style.pointerEvents = "none"
-    p.style.zIndex = "1000"
-    p.style.background = color
-    p.style.borderRadius = "50%"
-    p.style.width = `${Math.random() * 8 + 6}px`
-    p.style.height = p.style.width
-    p.style.left = `${x}px`
-    p.style.top = `${y}px`
-    
-    const angle = Math.random() * Math.PI * 2
-    const speed = Math.random() * 100 + 50
-    const tx = Math.cos(angle) * speed
-    const ty = Math.sin(angle) * speed
-    
-    p.animate([
-      { transform: `translate(0, 0) scale(1)`, opacity: 1 },
-      { transform: `translate(${tx}px, ${ty}px) scale(0)`, opacity: 0 }
-    ], { duration: 600, easing: 'ease-out' }).onfinish = () => p.remove()
-    
-    document.body.appendChild(p)
+// --- Steal Logic ---
+// TODO: Remove debug hints from cards before production
+function openStealModal(
+  targetPlayerId: PlayerId,
+  cardCount: number,
+  emojis: string[]
+) {
+  const player = Rune.getPlayerInfo(targetPlayerId)
+  if (!player) return
+
+  stealOverlay.querySelector("h2")!.textContent =
+    `Steal from ${player.displayName}`
+
+  stealGrid.innerHTML = ""
+  for (let i = 0; i < cardCount; i++) {
+    const card = document.createElement("div")
+    card.className = "steal-option"
+    card.innerHTML = `<span class="debug-hint">${emojis[i]}</span>`
+    card.onclick = () => {
+      Rune.actions.pickCard({
+        type: "player",
+        playerId: targetPlayerId,
+        index: i,
+      })
+      stealOverlay.classList.add("hidden")
+    }
+    stealGrid.appendChild(card)
   }
+
+  stealOverlay.classList.remove("hidden")
 }
 
 // --- Update Logic ---
 
 function updateUI(game: GameState, yourPlayerId: PlayerId | undefined) {
   const isMyTurn = game.turn === yourPlayerId
+  const isPickPhase = game.phase === "pick" && isMyTurn
 
   // Status & Turn
   const turnPlayer = Rune.getPlayerInfo(game.turn)
   let statusText = ""
   if (game.winner) statusText = "WINNER!"
-  else if (isMyTurn) statusText = game.phase === "draw" ? "DRAW!" : `FIND ${game.currentDrawnCard}!`
+  else if (isMyTurn)
+    statusText =
+      game.phase === "draw" ? "DRAW!" : `FIND ${game.currentDrawnCard}!`
   else statusText = "WAITING..."
 
-  turnIndicator.innerHTML = `
-    <img src="${turnPlayer.avatarUrl}" />
-    <div>
-      <div class="turn-player-name">${isMyTurn ? "YOU" : turnPlayer.displayName}</div>
-      <div class="turn-action-text">${statusText}</div>
-    </div>
-  `
+  if (turnPlayer) {
+    turnIndicator.innerHTML = `
+      <img src="${turnPlayer.avatarUrl}" />
+      <div>
+        <div class="turn-player-name">${isMyTurn ? "YOU" : turnPlayer.displayName}</div>
+        <div class="turn-action-text">${statusText}</div>
+      </div>
+    `
+  } else {
+    // Fallback if player info missing
+    turnIndicator.innerHTML = `<div><div class="turn-action-text">${statusText}</div></div>`
+  }
   turnIndicator.classList.toggle("my-turn", isMyTurn)
+
+  // Deck Count
+  if (deckCountEl) {
+    deckCountEl.textContent = game.deck.length.toString()
+  }
 
   // Center Cards
   game.centerCards.forEach((emoji, i) => {
     const el = guessCardElements[i]
     if (!el) return
     const front = el.querySelector(".front") as HTMLElement
-    el.classList.toggle("empty", emoji === null)
-    if (emoji) front.innerText = emoji
+    const back = el.querySelector(".back") as HTMLElement
+
+    const isEmpty = emoji === null
+    const wasEmpty = el.classList.contains("empty")
+
+    if (wasEmpty && !isEmpty) {
+      el.classList.remove("flipped", "shake")
+    }
+
+    el.classList.toggle("empty", isEmpty)
+    el.classList.toggle("interactive", isPickPhase && !isEmpty)
+
+    if (emoji) {
+      front.textContent = emoji
+      back.innerHTML = `<span class="debug-hint">${emoji}</span>`
+    } else {
+      back.innerHTML = ""
+    }
   })
 
   // Players & Hands
+  myHandContainer.innerHTML = ""
   game.playerIds.forEach((id) => {
     const node = playerNodes[id]
     if (!node) return
     node.classList.toggle("active-turn", id === game.turn)
-    
-    const cardsContainer = node.querySelector(".player-cards") as HTMLElement
+
+    const scoreBadge = node.querySelector(".score-badge") as HTMLElement
     const hand = game.playerHands[id] || []
 
-    // Re-render hand if count changes
-    if (cardsContainer.children.length !== hand.length) {
-      cardsContainer.innerHTML = ""
-      const totalCards = hand.length
-      // Calculate Fan Angle
-      const fanSpread = Math.min(totalCards * 15, 60) // Max 60 deg spread
-      const startAngle = -fanSpread / 2
+    if (scoreBadge) {
+      scoreBadge.textContent = hand.length.toString()
+      if (scoreBadge.getAttribute("data-prev") !== hand.length.toString()) {
+        scoreBadge.style.transform = "scale(1.5)"
+        setTimeout(() => (scoreBadge.style.transform = "scale(1)"), 200)
+        scoreBadge.setAttribute("data-prev", hand.length.toString())
+      }
+    }
 
-      hand.forEach((_, idx) => {
+    // TODO: Remove debug hints before production
+    const cardsDiv = node.querySelector(".player-cards") as HTMLElement
+    if (cardsDiv) {
+      cardsDiv.innerHTML = hand
+        .map((emoji) => `<span class="debug-hint-inline">${emoji}</span>`)
+        .join("")
+    }
+
+    // Only render MY hand at the bottom
+    if (id === yourPlayerId) {
+      const totalCards = hand.length
+      const cardSpacing = 60
+      const startOffset = -((totalCards - 1) * cardSpacing) / 2
+
+      hand.forEach((emoji, idx) => {
         const card = document.createElement("div")
         card.className = "hand-card"
-        
-        // Fan Logic
-        const step = totalCards > 1 ? fanSpread / (totalCards - 1) : 0
-        const angle = startAngle + (step * idx)
-        const yOffset = Math.abs(angle) * 0.4
-        
-        card.style.transform = `translateX(-50%) rotate(${angle}deg) translateY(${yOffset}px)`
-        card.style.zIndex = `${idx}`
+        card.innerHTML = `<span class="debug-hint">${emoji}</span>`
+
+        const xPos = startOffset + idx * cardSpacing
+        card.style.transform = `translateX(-50%) translateX(${xPos}px)`
+        card.style.zIndex = `${idx + 10}`
 
         card.onclick = (e) => {
           e.stopPropagation()
           Rune.actions.pickCard({ type: "player", playerId: id, index: idx })
         }
-        cardsContainer.appendChild(card)
+
+        myHandContainer.appendChild(card)
       })
     }
   })
 
   document.body.classList.toggle("can-draw", game.phase === "draw" && isMyTurn)
-  
+
   if (game.currentDrawnCard !== currentDrawnEmoji) {
     currentDrawnEmoji = game.currentDrawnCard
     renderDrawnReveal(currentDrawnEmoji)
@@ -196,70 +320,209 @@ function renderDrawnReveal(emoji: string | null) {
   if (!emoji) return
   const card = document.createElement("div")
   card.className = "revealed-card"
-  card.innerText = emoji
+  card.textContent = emoji
   drawnRevealContainer.appendChild(card)
 }
 
-function animateAction(game: GameState, action: any) {
+function getGhostCardPos(
+  playerId: PlayerId,
+  yourPlayerId: PlayerId | undefined
+): { x: number; y: number } {
+  if (playerId === yourPlayerId) {
+    const rect = myHandContainer.getBoundingClientRect()
+    return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 }
+  }
+  const node = playerNodes[playerId]
+  if (!node) return { x: 0, y: 0 }
+  const avatar = node.querySelector(".avatar-wrapper") as HTMLElement
+  if (!avatar) return { x: 0, y: 0 }
+  const rect = avatar.getBoundingClientRect()
+  const centerX = rect.left + rect.width / 2
+  const centerY = rect.top + rect.height / 2
+  return { x: centerX, y: centerY }
+}
+
+function spawnParticles(x: number, y: number, color: string) {
+  for (let i = 0; i < 12; i++) {
+    const p = document.createElement("div")
+    p.className = "particle" // Use CSS class for base styles if possible, but JS sets position
+    p.style.position = "fixed"
+    p.style.pointerEvents = "none"
+    p.style.zIndex = "1000"
+    p.style.background = color
+    p.style.borderRadius = "50%"
+    p.style.width = `${Math.random() * 8 + 6}px`
+    p.style.height = p.style.width
+    p.style.left = `${x}px`
+    p.style.top = `${y}px`
+
+    const angle = Math.random() * Math.PI * 2
+    const speed = Math.random() * 100 + 50
+    const tx = Math.cos(angle) * speed
+    const ty = Math.sin(angle) * speed
+
+    p.animate(
+      [
+        { transform: `translate(0, 0) scale(1)`, opacity: 1 },
+        { transform: `translate(${tx}px, ${ty}px) scale(0)`, opacity: 0 },
+      ],
+      { duration: 600, easing: "ease-out" }
+    ).onfinish = () => p.remove()
+
+    document.body.appendChild(p)
+  }
+}
+
+type Action = {
+  name: string
+  playerId: PlayerId
+  params: any
+}
+
+function animateAction(
+  game: GameState,
+  action: Action,
+  yourPlayerId: PlayerId | undefined
+) {
   if (action.name === "pickCard") {
     const res = game.lastResult
     if (!res) return
 
-    let sourceEl: HTMLElement | null = null
+    let startPos = { x: 0, y: 0 }
+    let startFaceUp = false
+
+    const isLocalAction = action.playerId === yourPlayerId
+
     if (res.from.type === "center") {
-      sourceEl = guessCardElements[res.from.index]
+      const sourceEl = guessCardElements[res.from.index]
       if (sourceEl) {
         sourceEl.classList.add("flipped")
+        startFaceUp = true
         if (!res.success) {
           sourceEl.classList.add("shake")
           setTimeout(() => sourceEl?.classList.remove("flipped", "shake"), 1000)
+
+          // Penalty: If someone else lost a card to the center, animate it
+          if (res.to === "center" && res.penalisedPlayerId) {
+            const emoji = game.currentDrawnCard
+            if (emoji) {
+              const pStart = getGhostCardPos(
+                res.penalisedPlayerId,
+                yourPlayerId
+              )
+              const ringRect = guessCardsRing.getBoundingClientRect()
+              flyCard(
+                emoji,
+                pStart,
+                {
+                  x: ringRect.left + ringRect.width / 2,
+                  y: ringRect.top + ringRect.height / 2,
+                },
+                false,
+                false
+              )
+            }
+          }
         } else {
           const rect = sourceEl.getBoundingClientRect()
-          spawnParticles(rect.left + rect.width/2, rect.top + rect.height/2, "#4ade80")
+          startPos = {
+            x: rect.left + rect.width / 2,
+            y: rect.top + rect.height / 2,
+          }
+          spawnParticles(startPos.x, startPos.y, "#4ade80")
+          setTimeout(() => sourceEl.classList.remove("flipped"), 500)
         }
       }
     } else {
-      // Animate from player hand
-      const node = playerNodes[res.from.playerId]
-      const handContainer = node?.querySelector(".player-cards")
-      sourceEl = handContainer?.children[res.from.index] as HTMLElement
+      startFaceUp = false
+      if (isLocalAction && lastClickPos) {
+        startPos = lastClickPos
+      } else {
+        startPos = getGhostCardPos(res.from.playerId, yourPlayerId)
+      }
     }
 
     if (res.success || res.to === "center") {
       let destEl: HTMLElement | null = null
-      if (res.to === "center") destEl = guessCardsRing
-      else if (res.to) destEl = playerNodes[res.to]?.querySelector(".avatar-wrapper") as HTMLElement
+      const destIsCenter = res.to === "center"
 
-      if (sourceEl && destEl) {
-        const start = sourceEl.getBoundingClientRect()
-        const end = destEl.getBoundingClientRect()
-        flyCard(res.emoji, 
-          { x: start.left + start.width/2, y: start.top + start.height/2 },
-          { x: end.left + end.width/2, y: end.top + end.height/2 },
-          res.success
+      if (destIsCenter) destEl = guessCardsRing
+      else if (res.to)
+        destEl = playerNodes[res.to]?.querySelector(
+          ".avatar-wrapper"
+        ) as HTMLElement
+
+      if (startPos.x !== 0 && destEl) {
+        const endRect = destEl.getBoundingClientRect()
+
+        flyCard(
+          res.emoji,
+          startPos,
+          {
+            x: endRect.left + endRect.width / 2,
+            y: endRect.top + endRect.height / 2,
+          },
+          res.success,
+          startFaceUp
         )
       }
     }
   }
 }
 
-function flyCard(emoji: string, from: {x:number, y:number}, to: {x:number, y:number}, success: boolean) {
+function flyCard(
+  emoji: string,
+  from: { x: number; y: number },
+  to: { x: number; y: number },
+  success: boolean,
+  startFaceUp: boolean
+) {
   const fly = document.createElement("div")
   fly.className = "flying-card"
-  fly.innerText = emoji
-  fly.style.border = success ? "4px solid #4ade80" : "4px solid white"
-  
+
+  fly.innerHTML = `
+    <div class="card-inner">
+      <div class="card-face back"><span class="debug-hint">${emoji}</span></div>
+      <div class="card-face front">${emoji}</div>
+    </div>
+  `
+
+  fly.style.border = "none"
+  fly.style.background = "transparent"
+  fly.style.boxShadow = "none"
   fly.style.left = `${from.x}px`
   fly.style.top = `${from.y}px`
   document.body.appendChild(fly)
 
-  // Force reflow
-  fly.offsetHeight
+  const startRot = startFaceUp ? 180 : 0
+  const finalRot = 0
 
-  fly.animate([
-    { transform: `translate(-50%, -50%) scale(1) rotate(0deg)`, left: `${from.x}px`, top: `${from.y}px` },
-    { transform: `translate(-50%, -50%) scale(0.5) rotate(360deg)`, left: `${to.x}px`, top: `${to.y}px` }
-  ], { duration: 600, easing: "cubic-bezier(0.34, 1.56, 0.64, 1)" }).onfinish = () => {
+  fly.firstElementChild!.animate(
+    [
+      { transform: `rotateY(${startRot}deg)` },
+      { transform: `rotateY(180deg)`, offset: 0.2 },
+      { transform: `rotateY(180deg)`, offset: 0.8 },
+      { transform: `rotateY(${finalRot}deg)` },
+    ],
+    { duration: 700, fill: "forwards" }
+  )
+
+  fly.animate(
+    [
+      {
+        transform: `translate(-50%, -50%) scale(1)`,
+        left: `${from.x}px`,
+        top: `${from.y}px`,
+      },
+      { transform: `translate(-50%, -50%) scale(1.2)`, offset: 0.5 },
+      {
+        transform: `translate(-50%, -50%) scale(0.5)`,
+        left: `${to.x}px`,
+        top: `${to.y}px`,
+      },
+    ],
+    { duration: 700, easing: "cubic-bezier(0.34, 1.56, 0.64, 1)" }
+  ).onfinish = () => {
     if (success) spawnParticles(to.x, to.y, "#facc15")
     fly.remove()
   }
@@ -267,13 +530,26 @@ function flyCard(emoji: string, from: {x:number, y:number}, to: {x:number, y:num
 
 Rune.initClient({
   onChange: ({ game, yourPlayerId, action, event }) => {
-    if (Object.keys(playerNodes).length !== game.playerIds.length || event?.name === "playerJoined" || event?.name === "playerLeft") {
-      initUI(game)
+    currentGame = game
+    if (
+      Object.keys(playerNodes).length !== game.playerIds.length ||
+      event?.name === "playerJoined" ||
+      event?.name === "playerLeft"
+    ) {
+      initUI(game, yourPlayerId)
     }
     updateUI(game, yourPlayerId)
     if (action) {
-      selectSound.play()
-      animateAction(game, action)
+      if (action.name === "drawCard") {
+        playSound("draw")
+      } else if (action.name === "pickCard") {
+        if (game.lastResult?.success) {
+          playSound("success")
+        } else {
+          playSound("fail")
+        }
+      }
+      animateAction(game, action as Action, yourPlayerId)
     }
   },
 })

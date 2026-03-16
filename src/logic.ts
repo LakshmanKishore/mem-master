@@ -1,8 +1,26 @@
 import type { PlayerId, RuneClient } from "rune-sdk"
 
-const EMOJIS = [
-  "🐶", "🐱", "🐭", "🐹", "🐰", "🦊", "🐻", "🐼", "🐨", "🐯",
-  "🦁", "🐮", "🐷", "🐸", "🐵", "🐔", "🐧", "🐦", "🐤", "🦆",
+export const EMOJIS = [
+  "🐶",
+  "🐱",
+  "🐭",
+  "🐹",
+  "🐰",
+  "🦊",
+  "🐻",
+  "🐼",
+  "🐨",
+  "🐯",
+  "🦁",
+  "🐮",
+  "🐷",
+  "🐸",
+  "🐵",
+  "🐔",
+  "🐧",
+  "🐦",
+  "🐤",
+  "🦆",
 ]
 
 export interface GameState {
@@ -16,22 +34,29 @@ export interface GameState {
   lastResult: {
     success: boolean
     emoji: string
-    from: { type: "center"; index: number } | { type: "player"; playerId: PlayerId; index: number }
+    from:
+      | { type: "center"; index: number }
+      | { type: "player"; playerId: PlayerId; index: number }
     to?: PlayerId | "center"
+    penalisedPlayerId?: PlayerId
   } | null
   winner: PlayerId | null
 }
 
 type GameActions = {
   drawCard: () => void
-  pickCard: (target: { type: "center"; index: number } | { type: "player"; playerId: PlayerId; index: number }) => void
+  pickCard: (
+    target:
+      | { type: "center"; index: number }
+      | { type: "player"; playerId: PlayerId; index: number }
+  ) => void
 }
 
 declare global {
   const Rune: RuneClient<GameState, GameActions>
 }
 
-function shuffle<T>(array: T[]): T[] {
+export function shuffle<T>(array: T[]): T[] {
   const newArray = [...array]
   for (let i = newArray.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1))
@@ -40,21 +65,23 @@ function shuffle<T>(array: T[]): T[] {
   return newArray
 }
 
-function generateGame(playerIds: PlayerId[]): GameState {
+export function generateGame(playerIds: PlayerId[]): GameState {
   const gameEmojis = shuffle(EMOJIS).slice(0, 9)
-  
+
   // Center starts with 9 cards
   const centerCards = [...gameEmojis]
-  
+
   // Deck count scales
   const deckSize = 10 + playerIds.length * 5
-  const deck: string[] = []
+  const deckPool: string[] = []
+  // Use a balanced pool to ensure all emojis appear somewhat equally
   for (let i = 0; i < deckSize; i++) {
-    deck.push(gameEmojis[Math.floor(Math.random() * gameEmojis.length)])
+    deckPool.push(gameEmojis[i % gameEmojis.length])
   }
+  const deck = shuffle(deckPool)
 
   const playerHands: Record<PlayerId, string[]> = {}
-  playerIds.forEach(id => {
+  playerIds.forEach((id) => {
     playerHands[id] = []
   })
 
@@ -71,26 +98,64 @@ function generateGame(playerIds: PlayerId[]): GameState {
   }
 }
 
-Rune.initLogic({
+export const logic: any = {
   minPlayers: 1,
   maxPlayers: 6,
-  setup: (allPlayerIds) => generateGame(allPlayerIds),
+  setup: (allPlayerIds: PlayerId[]) => generateGame(allPlayerIds),
   actions: {
-    drawCard: (_, { game, playerId }) => {
-      if (game.phase !== "draw" || game.turn !== playerId || game.deck.length === 0) {
+    drawCard: (_: any, { game, playerId }: any) => {
+      if (
+        game.phase !== "draw" ||
+        game.turn !== playerId ||
+        game.deck.length === 0
+      ) {
         return
       }
+
+      // Single player improvement: favor cards that are still in the center
+      if (game.playerIds.length === 1) {
+        const hand = game.playerHands[playerId]
+        const centerEmojis = game.centerCards.filter(
+          (c: any): c is string => c !== null
+        )
+
+        if (centerEmojis.length > 0) {
+          const topIndex = game.deck.length - 1
+          const topCard = game.deck[topIndex]
+
+          // If the top card is already in the player's hand, it's "taken"
+          if (hand.includes(topCard)) {
+            // Try to find a card in the deck that is still in the center
+            let swapIndex = -1
+            for (let i = topIndex - 1; i >= 0; i--) {
+              if (centerEmojis.includes(game.deck[i])) {
+                swapIndex = i
+                break
+              }
+            }
+
+            // If we found a better card, swap it with high probability (80%)
+            // This reduces the frequency of "already taken" cards
+            if (swapIndex !== -1 && Math.random() < 0.8) {
+              const temp = game.deck[topIndex]
+              game.deck[topIndex] = game.deck[swapIndex]
+              game.deck[swapIndex] = temp
+            }
+          }
+        }
+      }
+
       game.currentDrawnCard = game.deck.pop() || null
       game.phase = "pick"
       game.lastResult = null
     },
-    pickCard: (target, { game, playerId }) => {
+    pickCard: (target: any, { game, playerId }: any) => {
       if (game.phase !== "pick" || game.turn !== playerId) {
         return
       }
 
       let pickedEmoji: string | null = null
-      
+
       if (target.type === "center") {
         pickedEmoji = game.centerCards[target.index]
       } else {
@@ -101,7 +166,7 @@ Rune.initLogic({
       if (!pickedEmoji) return
 
       const isMatch = pickedEmoji === game.currentDrawnCard
-      
+
       if (isMatch) {
         // SUCCESS: Card goes to current player
         if (target.type === "center") {
@@ -109,65 +174,100 @@ Rune.initLogic({
         } else {
           game.playerHands[target.playerId].splice(target.index, 1)
           // Shuffle the target player's hand since they lost a card
-          game.playerHands[target.playerId] = shuffle(game.playerHands[target.playerId])
+          game.playerHands[target.playerId] = shuffle(
+            game.playerHands[target.playerId]
+          )
         }
-        
+
         game.playerHands[playerId].push(pickedEmoji)
         game.playerHands[playerId] = shuffle(game.playerHands[playerId])
-        
+
         game.lastResult = {
           success: true,
           emoji: pickedEmoji,
           from: target,
-          to: playerId
+          to: playerId,
         }
       } else {
-        // FAIL: If it was a player's card, it goes back to "the level" (center)
+        // FAIL: If it was a player's card, it goes back to the center circular thing
         if (target.type === "player") {
-          const emoji = game.playerHands[target.playerId].splice(target.index, 1)[0]
-          
+          const emoji = game.playerHands[target.playerId].splice(
+            target.index,
+            1
+          )[0]
+
           // Find first empty slot in center
-          let emptyIndex = game.centerCards.indexOf(null)
+          const emptyIndex = game.centerCards.indexOf(null)
           if (emptyIndex !== -1) {
             game.centerCards[emptyIndex] = emoji
           } else {
-            // Should not really happen with 9 slots and 9 unique emojis, but fallback
             game.centerCards.push(emoji)
-            emptyIndex = game.centerCards.length - 1
           }
 
-          game.playerHands[target.playerId] = shuffle(game.playerHands[target.playerId])
-          
+          game.playerHands[target.playerId] = shuffle(
+            game.playerHands[target.playerId]
+          )
+
           game.lastResult = {
             success: false,
             emoji: pickedEmoji,
             from: target,
-            to: "center"
+            to: "center",
           }
         } else {
-          // Failed center guess just ends turn
+          // Failed center guess:
+          // If the matching card is with some player, it goes back to the center
+          let penalisedPlayerId: PlayerId | null = null
+          for (const pid of game.playerIds) {
+            const hand = game.playerHands[pid]
+            const matchIndex = hand.indexOf(game.currentDrawnCard!)
+            if (matchIndex !== -1) {
+              const emoji = hand.splice(matchIndex, 1)[0]
+
+              // Find first empty slot in center
+              const emptyIndex = game.centerCards.indexOf(null)
+              if (emptyIndex !== -1) {
+                game.centerCards[emptyIndex] = emoji
+              } else {
+                game.centerCards.push(emoji)
+              }
+
+              game.playerHands[pid] = shuffle(game.playerHands[pid])
+              penalisedPlayerId = pid
+              break
+            }
+          }
+
           game.lastResult = {
             success: false,
             emoji: pickedEmoji,
-            from: target
+            from: target,
+            to: penalisedPlayerId ? "center" : undefined,
+            penalisedPlayerId: penalisedPlayerId || undefined,
           }
         }
       }
 
-      // Check for game over
-      if (game.deck.length === 0) {
-        const winners = game.playerIds.filter(id => {
+      // Check for game over: deck is empty OR center is empty
+      const isCenterEmpty = game.centerCards.every((c: any) => c === null)
+      if (game.deck.length === 0 || isCenterEmpty) {
+        const winners = game.playerIds.filter((id: any) => {
           const score = game.playerHands[id].length
-          const maxScore = Math.max(...game.playerIds.map(pid => game.playerHands[pid].length))
+          const maxScore = Math.max(
+            ...game.playerIds.map((pid: any) => game.playerHands[pid].length)
+          )
           return score === maxScore
         })
 
         if (winners.length === 1) game.winner = winners[0]
-        
+
         Rune.gameOver({
           players: Object.fromEntries(
-            game.playerIds.map(id => [id, winners.includes(id) ? "WON" : "LOST"])
-          )
+            game.playerIds.map((id: any) => [
+              id,
+              winners.includes(id) ? "WON" : "LOST",
+            ])
+          ),
         })
       } else {
         const currentIndex = game.playerIds.indexOf(playerId)
@@ -178,13 +278,13 @@ Rune.initLogic({
     },
   },
   events: {
-    playerJoined: (playerId, { game }) => {
+    playerJoined: (playerId: any, { game }: any) => {
       game.playerIds.push(playerId)
       game.playerHands[playerId] = []
     },
-    playerLeft: (playerId, { game }) => {
+    playerLeft: (playerId: any, { game }: any) => {
       const hand = game.playerHands[playerId] || []
-      hand.forEach(emoji => {
+      hand.forEach((emoji: any) => {
         const nullIndex = game.centerCards.indexOf(null)
         if (nullIndex !== -1) game.centerCards[nullIndex] = emoji
         else game.centerCards.push(emoji)
@@ -202,4 +302,8 @@ Rune.initLogic({
       }
     },
   },
-})
+}
+
+if (typeof Rune !== "undefined") {
+  Rune.initLogic(logic)
+}
