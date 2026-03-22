@@ -4,6 +4,8 @@ import { vi } from 'vitest'
 global.Rune = {
   initLogic: vi.fn(),
   initClient: vi.fn(),
+  gameOver: vi.fn(), // Added
+  invalidAction: vi.fn(), // Added
   getPlayerInfo: (id: string) => ({
     playerId: id,
     displayName: id === 'p1' ? 'You' : 'Opponent',
@@ -20,6 +22,29 @@ global.Audio = class {
   play() { return Promise.resolve() }
   pause() {}
 } as any
+
+class MockAudioContext {
+  createOscillator() {
+    return {
+      connect: vi.fn(),
+      frequency: { setValueAtTime: vi.fn(), exponentialRampToValueAtTime: vi.fn(), linearRampToValueAtTime: vi.fn() },
+      start: vi.fn(),
+      stop: vi.fn(),
+      type: 'sine'
+    }
+  }
+  createGain() {
+    return {
+      connect: vi.fn(),
+      gain: { setValueAtTime: vi.fn(), exponentialRampToValueAtTime: vi.fn() }
+    }
+  }
+  destination = {}
+  currentTime = 0
+}
+
+;(global as any).AudioContext = MockAudioContext
+;(global as any).webkitAudioContext = MockAudioContext
 
 // Mock Animation API
 if (!Element.prototype.animate) {

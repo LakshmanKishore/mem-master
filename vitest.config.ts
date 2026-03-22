@@ -6,6 +6,5 @@ export default defineConfig({
     environment: 'jsdom', // Mocks browser
     setupFiles: ['./tests/setup.ts'], // Will create this
     include: ['tests/**/*.{test,spec}.ts'],
-    exclude: ['tests/e2e.test.ts'], // Exclude Playwright (broken on Android)
   },
 })

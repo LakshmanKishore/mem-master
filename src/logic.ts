@@ -98,12 +98,15 @@ export function generateGame(playerIds: PlayerId[]): GameState {
   }
 }
 
-export const logic: any = {
+export const logic = {
   minPlayers: 1,
   maxPlayers: 6,
   setup: (allPlayerIds: PlayerId[]) => generateGame(allPlayerIds),
   actions: {
-    drawCard: (_: any, { game, playerId }: any) => {
+    drawCard: (
+      _: unknown,
+      { game, playerId }: { game: GameState; playerId: PlayerId }
+    ) => {
       if (
         game.phase !== "draw" ||
         game.turn !== playerId ||
@@ -116,7 +119,7 @@ export const logic: any = {
       if (game.playerIds.length === 1) {
         const hand = game.playerHands[playerId]
         const centerEmojis = game.centerCards.filter(
-          (c: any): c is string => c !== null
+          (c): c is string => c !== null
         )
 
         if (centerEmojis.length > 0) {
@@ -149,7 +152,12 @@ export const logic: any = {
       game.phase = "pick"
       game.lastResult = null
     },
-    pickCard: (target: any, { game, playerId }: any) => {
+    pickCard: (
+      target:
+        | { type: "center"; index: number }
+        | { type: "player"; playerId: PlayerId; index: number },
+      { game, playerId }: { game: GameState; playerId: PlayerId }
+    ) => {
       if (game.phase !== "pick" || game.turn !== playerId) {
         return
       }
@@ -189,12 +197,12 @@ export const logic: any = {
           to: playerId,
         }
       } else {
-        // FAIL: If it was a player's card, it goes back to the center circular thing
-        if (target.type === "player") {
-          const emoji = game.playerHands[target.playerId].splice(
-            target.index,
-            1
-          )[0]
+        // FAIL: Only penalty if the CURRENT player had the matching card
+        const hand = game.playerHands[playerId]
+        const matchIndex = hand.indexOf(game.currentDrawnCard!)
+
+        if (matchIndex !== -1) {
+          const emoji = hand.splice(matchIndex, 1)[0]
 
           // Find first empty slot in center
           const emptyIndex = game.centerCards.indexOf(null)
@@ -204,57 +212,32 @@ export const logic: any = {
             game.centerCards.push(emoji)
           }
 
-          game.playerHands[target.playerId] = shuffle(
-            game.playerHands[target.playerId]
-          )
+          game.playerHands[playerId] = shuffle(game.playerHands[playerId])
 
           game.lastResult = {
             success: false,
             emoji: pickedEmoji,
             from: target,
             to: "center",
+            penalisedPlayerId: playerId,
           }
         } else {
-          // Failed center guess:
-          // If the matching card is with some player, it goes back to the center
-          let penalisedPlayerId: PlayerId | null = null
-          for (const pid of game.playerIds) {
-            const hand = game.playerHands[pid]
-            const matchIndex = hand.indexOf(game.currentDrawnCard!)
-            if (matchIndex !== -1) {
-              const emoji = hand.splice(matchIndex, 1)[0]
-
-              // Find first empty slot in center
-              const emptyIndex = game.centerCards.indexOf(null)
-              if (emptyIndex !== -1) {
-                game.centerCards[emptyIndex] = emoji
-              } else {
-                game.centerCards.push(emoji)
-              }
-
-              game.playerHands[pid] = shuffle(game.playerHands[pid])
-              penalisedPlayerId = pid
-              break
-            }
-          }
-
+          // No match in hand, just a normal fail
           game.lastResult = {
             success: false,
             emoji: pickedEmoji,
             from: target,
-            to: penalisedPlayerId ? "center" : undefined,
-            penalisedPlayerId: penalisedPlayerId || undefined,
           }
         }
       }
 
       // Check for game over: deck is empty OR center is empty
-      const isCenterEmpty = game.centerCards.every((c: any) => c === null)
+      const isCenterEmpty = game.centerCards.every((c) => c === null)
       if (game.deck.length === 0 || isCenterEmpty) {
-        const winners = game.playerIds.filter((id: any) => {
+        const winners = game.playerIds.filter((id) => {
           const score = game.playerHands[id].length
           const maxScore = Math.max(
-            ...game.playerIds.map((pid: any) => game.playerHands[pid].length)
+            ...game.playerIds.map((pid) => game.playerHands[pid].length)
           )
           return score === maxScore
         })
@@ -263,7 +246,7 @@ export const logic: any = {
 
         Rune.gameOver({
           players: Object.fromEntries(
-            game.playerIds.map((id: any) => [
+            game.playerIds.map((id) => [
               id,
               winners.includes(id) ? "WON" : "LOST",
             ])
@@ -278,13 +261,13 @@ export const logic: any = {
     },
   },
   events: {
-    playerJoined: (playerId: any, { game }: any) => {
+    playerJoined: (playerId: PlayerId, { game }: { game: GameState }) => {
       game.playerIds.push(playerId)
       game.playerHands[playerId] = []
     },
-    playerLeft: (playerId: any, { game }: any) => {
+    playerLeft: (playerId: PlayerId, { game }: { game: GameState }) => {
       const hand = game.playerHands[playerId] || []
-      hand.forEach((emoji: any) => {
+      hand.forEach((emoji) => {
         const nullIndex = game.centerCards.indexOf(null)
         if (nullIndex !== -1) game.centerCards[nullIndex] = emoji
         else game.centerCards.push(emoji)
