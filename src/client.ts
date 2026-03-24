@@ -14,6 +14,12 @@ const turnIndicator = document.getElementById("turn-indicator")!
 const helpBtn = document.getElementById("help-btn")!
 const helpOverlay = document.getElementById("help-overlay")!
 const closeHelpBtn = document.getElementById("close-help")!
+const roundIndicator = document.getElementById("round-indicator")!
+const streakIndicator = document.getElementById("streak-indicator")!
+const streakCount = document.getElementById("streak-count")!
+const powerupsWrapper = document.getElementById("powerups-wrapper")!
+const powerupsContainer = document.getElementById("powerups-container")!
+const statusToast = document.getElementById("status-toast")!
 
 // Steal Modal Elements
 const stealOverlay = document.getElementById("steal-overlay")!
@@ -29,7 +35,7 @@ const audioCtx = new (
   (window as unknown as WindowWithAudio).webkitAudioContext
 )()
 
-function playSound(type: "draw" | "success" | "fail" | "steal") {
+function playSound(type: "draw" | "success" | "fail" | "steal" | "powerup") {
   const osc = audioCtx.createOscillator()
   const gain = audioCtx.createGain()
   osc.connect(gain)
@@ -67,14 +73,23 @@ function playSound(type: "draw" | "success" | "fail" | "steal") {
     gain.gain.exponentialRampToValueAtTime(0.01, now + 0.2)
     osc.start(now)
     osc.stop(now + 0.2)
+  } else if (type === "powerup") {
+    osc.type = "triangle"
+    osc.frequency.setValueAtTime(800, now)
+    osc.frequency.exponentialRampToValueAtTime(1600, now + 0.4)
+    gain.gain.setValueAtTime(0.2, now)
+    gain.gain.exponentialRampToValueAtTime(0.01, now + 0.4)
+    osc.start(now)
+    osc.stop(now + 0.4)
   }
 }
 
 let playerNodes: Record<PlayerId, HTMLElement> = {}
-let guessCardElements: HTMLElement[] = []
+const guessCardMap: Map<number, HTMLElement> = new Map() // cardId -> element
 let currentDrawnEmoji: string | null = null
 let lastClickPos: { x: number; y: number } | null = null
 let currentGame: GameState | null = null
+let currentRound: number = 0
 
 // --- Initialization ---
 helpBtn.onclick = () => helpOverlay.classList.remove("hidden")
@@ -93,23 +108,9 @@ document.addEventListener(
 function initUI(game: GameState, yourPlayerId: PlayerId | undefined) {
   playersRing.innerHTML = ""
   guessCardsRing.innerHTML = ""
-  guessCardElements = []
+  guessCardMap.clear()
   playerNodes = {}
-  const cardRadius = 25
-  for (let i = 0; i < 9; i++) {
-    const angle = (i * 360) / 9
-    const x = 50 + cardRadius * Math.cos((angle - 90) * (Math.PI / 180))
-    const y = 50 + cardRadius * Math.sin((angle - 90) * (Math.PI / 180))
-    const card = document.createElement("div")
-    card.className = "guess-card"
-    card.style.left = `${x}%`
-    card.style.top = `${y}%`
-    card.style.transform = `translate(-50%, -50%) rotate(${angle}deg)`
-    card.innerHTML = `<div class="card-inner"><div class="card-face back"></div><div class="card-face front"></div></div>`
-    card.onclick = () => Rune.actions.pickCard({ type: "center", index: i })
-    guessCardsRing.appendChild(card)
-    guessCardElements.push(card)
-  }
+
   const playerRadius = 45
   game.playerIds.forEach((id, index) => {
     const info = Rune.getPlayerInfo(id)
@@ -123,12 +124,14 @@ function initUI(game: GameState, yourPlayerId: PlayerId | undefined) {
     node.style.left = `${x}%`
     node.style.top = `${y}%`
     node.style.transform = `translate(-50%, -50%)`
-    node.innerHTML = `<div class="avatar-wrapper"><img class="avatar-image" src="${info.avatarUrl}" /><div class="score-badge">0</div><div class="player-cards"></div></div><div class="player-name">${info.displayName}</div>`
+    node.innerHTML = `<div class="player-name">${info.displayName}</div><div class="avatar-wrapper"><img class="avatar-image" src="${info.avatarUrl}" /><div class="score-badge">0</div><div class="player-cards"></div><div class="shield-icon hidden">🛡️</div></div>`
     if (!isMe) {
       node.onclick = () => {
-        if (!currentGame) return
+        if (currentGame?.phase !== "pick" || currentGame.turn !== yourPlayerId)
+          return
         const hand = currentGame.playerHands[id] || []
-        if (hand.length >= 1) openStealModal(id, hand.length, hand)
+        if (hand.length >= 1)
+          openStealModal(id, hand.length, hand, yourPlayerId)
       }
     }
     playersRing.appendChild(node)
@@ -136,13 +139,18 @@ function initUI(game: GameState, yourPlayerId: PlayerId | undefined) {
   })
   // Re-create deck structure with count
   deckStack.innerHTML = `<div class="deck-top">🎴</div><div id="deck-count">${game.deck.length}</div>`
-  deckStack.onclick = () => Rune.actions.drawCard()
+  deckStack.onclick = () => {
+    if (currentGame?.phase === "draw" && currentGame.turn === yourPlayerId) {
+      Rune.actions.drawCard()
+    }
+  }
 }
 
 function openStealModal(
   targetPlayerId: PlayerId,
   cardCount: number,
-  emojis: string[]
+  emojis: string[],
+  yourPlayerId: PlayerId | undefined
 ) {
   const player = Rune.getPlayerInfo(targetPlayerId)
   if (!player) return
@@ -152,24 +160,132 @@ function openStealModal(
   for (let i = 0; i < cardCount; i++) {
     const card = document.createElement("div")
     card.className = "steal-option"
-    card.innerHTML = `<span class="debug-hint">${emojis[i]}</span>`
+    card.innerHTML = ``
     card.onclick = () => {
-      Rune.actions.pickCard({
-        type: "player",
-        playerId: targetPlayerId,
-        index: i,
-      })
-      stealOverlay.classList.add("hidden")
+      if (currentGame?.phase === "pick" && currentGame.turn === yourPlayerId) {
+        Rune.actions.pickCard({
+          type: "player",
+          playerId: targetPlayerId,
+          index: i,
+        })
+        stealOverlay.classList.add("hidden")
+      }
     }
     stealGrid.appendChild(card)
   }
   stealOverlay.classList.remove("hidden")
 }
 
+function renderCenterCards(
+  game: GameState,
+  isPickPhase: boolean,
+  yourPlayerId: PlayerId | undefined
+) {
+  const count = game.centerCards.length
+  const cardRadius = 25
+
+  // 1. Identify which cards stayed, which are new, and which are gone
+  const currentIds = new Set(game.centerCards.map((c) => c.id))
+
+  // 2. Remove DOM elements for cards that are gone
+  for (const [id, el] of guessCardMap.entries()) {
+    if (!currentIds.has(id)) {
+      // Small delay to allow flip animation to finish if it was just picked
+      setTimeout(() => {
+        if (el.parentNode === guessCardsRing) {
+          guessCardsRing.removeChild(el)
+        }
+      }, 500)
+      guessCardMap.delete(id)
+    }
+  }
+
+  // 3. Update positions and content for current cards
+  game.centerCards.forEach((card, i) => {
+    let el = guessCardMap.get(card.id)
+
+    if (!el) {
+      // Create new element for new card (e.g. penalty return)
+      el = document.createElement("div")
+      el.className = "guess-card"
+      el.innerHTML = `<div class="card-inner"><div class="card-face back"></div><div class="card-face front"></div></div>`
+      guessCardsRing.appendChild(el)
+      guessCardMap.set(card.id, el)
+    }
+
+    // Calculate position based on current count and index
+    const angle = (i * 360) / count
+    const x = 50 + cardRadius * Math.cos((angle - 90) * (Math.PI / 180))
+    const y = 50 + cardRadius * Math.sin((angle - 90) * (Math.PI / 180))
+
+    // Set stable styles (transitions are in CSS)
+    el.style.left = `${x}%`
+    el.style.top = `${y}%`
+    el.style.transform = `translate(-50%, -50%) rotate(${angle}deg)`
+
+    // Ensure no stale state
+    el.classList.remove("flipped", "shake")
+
+    // Update click handler with fresh index
+    el.onclick = () => {
+      if (currentGame?.phase === "pick" && currentGame.turn === yourPlayerId) {
+        Rune.actions.pickCard({ type: "center", index: i })
+      }
+    }
+
+    // Update content
+    const front = el.querySelector(".front") as HTMLElement
+    const back = el.querySelector(".back") as HTMLElement
+    el.classList.toggle("interactive", isPickPhase)
+    front.textContent = card.emoji
+    back.innerHTML = ``
+  })
+}
+
 function updateUI(game: GameState, yourPlayerId: PlayerId | undefined) {
   const isMyTurn = game.turn === yourPlayerId
   const isPickPhase = game.phase === "pick" && isMyTurn
   const turnPlayer = Rune.getPlayerInfo(game.turn)
+
+  if (currentRound !== game.round) {
+    currentRound = game.round
+    roundIndicator.textContent = `ROUND ${game.round}`
+    roundIndicator.classList.add("pop")
+    setTimeout(() => roundIndicator.classList.remove("pop"), 1000)
+    // Dynamic BG based on round
+    const colors = ["#a5f3fc", "#c4b5fd", "#f9a8d4"]
+    document.body.style.setProperty(
+      "--bg-gradient",
+      `linear-gradient(135deg, ${colors[game.round - 1]} 0%, #c4b5fd 100%)`
+    )
+  }
+
+  // Update Streak
+  const myStreak = yourPlayerId ? game.streaks[yourPlayerId] || 0 : 0
+  if (myStreak > 0) {
+    streakIndicator.classList.remove("hidden")
+    streakCount.textContent = myStreak.toString()
+  } else {
+    streakIndicator.classList.add("hidden")
+  }
+
+  // Update Power-ups
+  powerupsContainer.innerHTML = ""
+  const myPowerUps = yourPlayerId ? game.powerUps[yourPlayerId] || [] : []
+  if (myPowerUps.length > 0) {
+    powerupsWrapper.classList.remove("hidden")
+    myPowerUps.forEach((type) => {
+      const btn = document.createElement("button")
+      btn.className = "powerup-btn"
+      const emoji = type === "shuffle" ? "🌀" : type === "peek" ? "👁️" : "🛡️"
+      btn.innerHTML = `<span>${emoji}</span> ${type.toUpperCase()}`
+      btn.onclick = () => Rune.actions.usePowerUp(type)
+      powerupsContainer.appendChild(btn)
+    })
+  } else {
+    powerupsWrapper.classList.add("hidden")
+  }
+
   let statusText = ""
   if (game.winner) statusText = "WINNER!"
   else if (isMyTurn)
@@ -188,42 +304,38 @@ function updateUI(game: GameState, yourPlayerId: PlayerId | undefined) {
   if (currentDeckCount)
     currentDeckCount.textContent = game.deck.length.toString()
 
-  game.centerCards.forEach((emoji, i) => {
-    const el = guessCardElements[i]
-    if (!el) return
-    const front = el.querySelector(".front") as HTMLElement
-    const back = el.querySelector(".back") as HTMLElement
-    const isEmpty = emoji === null
-    const wasEmpty = el.classList.contains("empty")
-    if (wasEmpty && !isEmpty) el.classList.remove("flipped", "shake")
-    el.classList.toggle("empty", isEmpty)
-    el.classList.toggle("interactive", isPickPhase && !isEmpty)
-    if (emoji) {
-      front.textContent = emoji
-      back.innerHTML = `<span class="debug-hint">${emoji}</span>`
-    } else {
-      back.innerHTML = ""
-    }
-  })
+  renderCenterCards(game, isPickPhase, yourPlayerId)
+
   myHandContainer.innerHTML = ""
   game.playerIds.forEach((id) => {
     const node = playerNodes[id]
     if (!node) return
     node.classList.toggle("active-turn", id === game.turn)
+
+    // Shield
+    const shieldIcon = node.querySelector(".shield-icon")
+    if (shieldIcon) {
+      shieldIcon.classList.toggle("hidden", !game.shieldedPlayers.includes(id))
+    }
+
     const scoreBadge = node.querySelector(".score-badge") as HTMLElement
     const hand = game.playerHands[id] || []
     if (scoreBadge) {
-      scoreBadge.textContent = hand.length.toString()
-      if (scoreBadge.getAttribute("data-prev") !== hand.length.toString()) {
+      const currentScore = (game.scores[id] || 0) + hand.length
+      scoreBadge.textContent = currentScore.toString()
+      if (scoreBadge.getAttribute("data-prev") !== currentScore.toString()) {
         scoreBadge.style.transform = "scale(1.5)"
         setTimeout(() => (scoreBadge.style.transform = "scale(1)"), 200)
-        scoreBadge.setAttribute("data-prev", hand.length.toString())
+        scoreBadge.setAttribute("data-prev", currentScore.toString())
       }
     }
     const cardsDiv = node.querySelector(".player-cards") as HTMLElement
     if (cardsDiv)
       cardsDiv.innerHTML = hand
-        .map((emoji) => `<span class="debug-hint-inline">${emoji}</span>`)
+        .map(
+          (_, idx) =>
+            `<div class="mini-card ${idx === hand.length - 1 ? "newest" : ""}"></div>`
+        )
         .join("")
     if (id === yourPlayerId) {
       const totalCards = hand.length
@@ -232,13 +344,18 @@ function updateUI(game: GameState, yourPlayerId: PlayerId | undefined) {
       hand.forEach((emoji, idx) => {
         const card = document.createElement("div")
         card.className = "hand-card"
-        card.innerHTML = `<span class="debug-hint">${emoji}</span>`
+        card.innerHTML = ``
         const xPos = startOffset + idx * cardSpacing
         card.style.transform = `translateX(-50%) translateX(${xPos}px)`
         card.style.zIndex = `${idx + 10}`
         card.onclick = (e) => {
           e.stopPropagation()
-          Rune.actions.pickCard({ type: "player", playerId: id, index: idx })
+          if (
+            currentGame?.phase === "pick" &&
+            currentGame.turn === yourPlayerId
+          ) {
+            Rune.actions.pickCard({ type: "player", playerId: id, index: idx })
+          }
         }
         myHandContainer.appendChild(card)
       })
@@ -258,6 +375,12 @@ function renderDrawnReveal(emoji: string | null) {
   card.className = "revealed-card"
   card.textContent = emoji
   drawnRevealContainer.appendChild(card)
+}
+
+function showToast(text: string, duration = 2000) {
+  statusToast.textContent = text
+  statusToast.classList.add("visible")
+  setTimeout(() => statusToast.classList.remove("visible"), duration)
 }
 
 function getGhostCardPos(
@@ -315,6 +438,20 @@ function animateAction(
   action: RuneAction,
   yourPlayerId: PlayerId | undefined
 ) {
+  if (action.name === "usePowerUp") {
+    playSound("powerup")
+    const type = action.params as string
+    const player = Rune.getPlayerInfo(action.playerId)
+    showToast(`${player?.displayName || "Player"} used ${type.toUpperCase()}!`)
+    if (type === "peek") {
+      guessCardMap.forEach((el) => {
+        el.classList.add("flipped")
+        setTimeout(() => el.classList.remove("flipped"), 1500)
+      })
+    }
+    return
+  }
+
   if (action.name === "pickCard") {
     // Cast params to access properties if needed in future, but for now just validate type
     void (action.params as {
@@ -324,11 +461,33 @@ function animateAction(
     })
     const res = game.lastResult
     if (!res) return
+
+    if (res.powerUpAwarded) {
+      const player = Rune.getPlayerInfo(action.playerId)
+      showToast(
+        `${player?.displayName || "Player"} earned ${res.powerUpAwarded.toUpperCase()}!`
+      )
+      playSound("powerup")
+    }
+
     let startPos = { x: 0, y: 0 }
     let startFaceUp = false
     const isLocalAction = action.playerId === yourPlayerId
+
+    if (res.emoji === "🛡️") {
+      // Shield block animation
+      const targetNode =
+        playerNodes[(action.params as { playerId: PlayerId }).playerId]
+      if (targetNode) {
+        targetNode.classList.add("shake")
+        showToast("SHIELDED! 🛡️")
+        setTimeout(() => targetNode.classList.remove("shake"), 500)
+      }
+      return
+    }
+
     if (res.from.type === "center") {
-      const sourceEl = guessCardElements[res.from.index]
+      const sourceEl = guessCardMap.get(res.from.id)
       if (sourceEl) {
         sourceEl.classList.add("flipped")
         startFaceUp = true
@@ -405,7 +564,7 @@ function flyCard(
 ) {
   const fly = document.createElement("div")
   fly.className = "flying-card"
-  fly.innerHTML = `<div class="card-inner"><div class="card-face back"><span class="debug-hint">${emoji}</span></div><div class="card-face front">${emoji}</div></div>`
+  fly.innerHTML = `<div class="card-inner"><div class="card-face back"></div><div class="card-face front">${emoji}</div></div>`
   fly.style.border = "none"
   fly.style.background = "transparent"
   fly.style.boxShadow = "none"

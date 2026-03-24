@@ -14,6 +14,7 @@ global.Rune = {
   actions: {
     drawCard: vi.fn(),
     pickCard: vi.fn(),
+    usePowerUp: vi.fn(),
   },
 } as any
 
@@ -64,8 +65,19 @@ global.requestAnimationFrame = (cb: any) => setTimeout(cb, 0) as any
 // Create the HTML structure
 document.body.innerHTML = `
 <div id="ui-layer">
+  <div id="round-indicator">ROUND 1</div>
   <div id="turn-indicator"></div>
   <button id="help-btn">?</button>
+  
+  <div id="streak-indicator" class="hidden">
+    <span class="fire-icon">🔥</span> <span id="streak-count">0</span> STREAK
+  </div>
+
+  <div id="powerups-wrapper" class="hidden">
+    <div class="powerups-label">POWER-UPS</div>
+    <div id="powerups-container"></div>
+  </div>
+  
   <div id="status-toast"></div>
   <div id="my-hand-container"></div>
 </div>
@@ -73,7 +85,10 @@ document.body.innerHTML = `
   <div id="table-surface"></div>
   <div id="guess-cards-ring"></div>
   <div id="players-ring"></div>
-  <div id="deck-stack"><div class="deck-top">🎴</div></div>
+  <div id="deck-stack">
+    <div class="deck-top">🎴</div>
+    <div id="deck-count">0</div>
+  </div>
   <div id="drawn-reveal-container"></div>
 </div>
 <div id="steal-overlay" class="hidden">

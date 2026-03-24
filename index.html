@@ -49,8 +49,19 @@
     <main>
       <!-- Move UI outside the 3D container so it always works -->
       <div id="ui-layer">
+        <div id="round-indicator">ROUND 1</div>
         <div id="turn-indicator"></div>
         <button id="help-btn">?</button>
+        
+        <div id="streak-indicator" class="hidden">
+          <span class="fire-icon">🔥</span> <span id="streak-count">0</span> STREAK
+        </div>
+
+        <div id="powerups-wrapper" class="hidden">
+          <div class="powerups-label">POWER-UPS</div>
+          <div id="powerups-container"></div>
+        </div>
+        
         <div id="status-toast"></div>
         <!-- My Hand at the bottom of UI layer -->
         <div id="my-hand-container"></div>
@@ -84,10 +95,15 @@
       <div id="help-overlay" class="hidden">
         <div class="help-modal">
           <h2>How to Play</h2>
-          <p><strong>1. Draw:</strong> Click the center deck to reveal a target emoji.</p>
-          <p><strong>2. Guess:</strong> Find that emoji! It could be in the <strong>Center Circle</strong> or in a <strong>Player's Hand</strong>.</p>
-          <p><strong>3. Steal:</strong> Guess correctly to take the card!</p>
-          <p><strong>4. Risk:</strong> Wrong guesses return the card to the center.</p>
+          <p><strong>1. Draw & Match:</strong> Click the deck to reveal a target. Find it in the <strong>Center</strong> or <strong>Steal</strong> from a player!</p>
+          <p><strong>2. Rounds:</strong> The game has 3 Rounds. Each round adds more cards and difficulty.</p>
+          <p><strong>3. Power-ups:</strong> Get a <strong>3x Streak</strong> to unlock a Power-up:</p>
+          <ul style="text-align: left; margin-bottom: 15px;">
+            <li>🌀 <strong>Shuffle:</strong> Mixes the center cards.</li>
+            <li>👁️ <strong>Peek:</strong> Briefly reveals all center cards.</li>
+            <li>🛡️ <strong>Shield:</strong> Protects you from theft for one turn.</li>
+          </ul>
+          <p><strong>4. Win:</strong> Total score (collected cards) accumulates across 3 rounds. Highest total score wins!</p>
           <button id="close-help">Got it!</button>
         </div>
       </div>

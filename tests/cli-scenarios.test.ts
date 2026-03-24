@@ -10,6 +10,7 @@ const runeInitSpy = global.Rune.initClient as any
 const actionSpies = {
   drawCard: global.Rune.actions.drawCard as any,
   pickCard: global.Rune.actions.pickCard as any,
+  usePowerUp: global.Rune.actions.usePowerUp as any,
 }
 
 class IntegrationRunner implements LabRunner {
@@ -82,6 +83,7 @@ class IntegrationRunner implements LabRunner {
     // Clear spies before click to detect new actions
     actionSpies.drawCard.mockClear()
     actionSpies.pickCard.mockClear()
+    actionSpies.usePowerUp.mockClear()
 
     // Perform click
     if ((el as any).click) {
@@ -97,6 +99,8 @@ class IntegrationRunner implements LabRunner {
       triggered = { name: 'drawCard', params: actionSpies.drawCard.mock.calls[0][0] }
     } else if (actionSpies.pickCard.mock.calls.length > 0) {
       triggered = { name: 'pickCard', params: actionSpies.pickCard.mock.calls[0][0] }
+    } else if (actionSpies.usePowerUp.mock.calls.length > 0) {
+      triggered = { name: 'usePowerUp', params: actionSpies.usePowerUp.mock.calls[0][0] }
     }
 
     // If action triggered, run logic
