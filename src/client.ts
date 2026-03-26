@@ -207,7 +207,7 @@ function renderCenterCards(
     if (!el) {
       // Create new element for new card (e.g. penalty return)
       el = document.createElement("div")
-      el.className = "guess-card"
+      el.className = "guess-card just-spawned"
       el.innerHTML = `<div class="card-inner"><div class="card-face back"></div><div class="card-face front"></div></div>`
       guessCardsRing.appendChild(el)
       guessCardMap.set(card.id, el)
@@ -400,28 +400,40 @@ function getGhostCardPos(
 }
 
 function spawnParticles(x: number, y: number, color: string) {
-  for (let i = 0; i < 12; i++) {
+  const colors = [color, "#ffffff", "#facc15", "#c4b5fd"]
+  for (let i = 0; i < 20; i++) {
     const p = document.createElement("div")
     p.className = "particle"
     p.style.position = "fixed"
     p.style.pointerEvents = "none"
     p.style.zIndex = "1000"
-    p.style.background = color
+    p.style.background = colors[Math.floor(Math.random() * colors.length)]
     p.style.borderRadius = "50%"
-    p.style.width = `${Math.random() * 8 + 6}px`
-    p.style.height = p.style.width
+    const size = Math.random() * 6 + 4
+    p.style.width = `${size}px`
+    p.style.height = `${size}px`
     p.style.left = `${x}px`
     p.style.top = `${y}px`
-    const speed = Math.random() * 100 + 50
+
+    // Random angle and distance
     const angle = Math.random() * Math.PI * 2
-    const tx = Math.cos(angle) * speed
-    const ty = Math.sin(angle) * speed
+    const velocity = Math.random() * 150 + 50
+    const tx = Math.cos(angle) * velocity
+    const ty = Math.sin(angle) * velocity
+
+    // Animate with gravity approximation (y increases more over time)
+    const duration = 800 + Math.random() * 400
     p.animate(
       [
         { transform: `translate(0, 0) scale(1)`, opacity: 1 },
-        { transform: `translate(${tx}px, ${ty}px) scale(0)`, opacity: 0 },
+        {
+          transform: `translate(${tx * 0.5}px, ${ty * 0.5 - 50}px) scale(1)`,
+          opacity: 1,
+          offset: 0.4,
+        }, // Upward burst
+        { transform: `translate(${tx}px, ${ty + 100}px) scale(0)`, opacity: 0 }, // Fall down
       ],
-      { duration: 600, easing: "ease-out" }
+      { duration, easing: "cubic-bezier(0.25, 1, 0.5, 1)" }
     ).onfinish = () => p.remove()
     document.body.appendChild(p)
   }
@@ -493,6 +505,18 @@ function animateAction(
         startFaceUp = true
         if (!res.success) {
           sourceEl.classList.add("shake")
+          // Screen shake on failure
+          if (isLocalAction) {
+            document.body.animate(
+              [
+                { transform: "translateX(0)" },
+                { transform: "translateX(-5px)" },
+                { transform: "translateX(5px)" },
+                { transform: "translateX(0)" },
+              ],
+              { duration: 200 }
+            )
+          }
           setTimeout(() => sourceEl?.classList.remove("flipped", "shake"), 1000)
           if (res.to === "center" && res.penalisedPlayerId) {
             const emoji = game.currentDrawnCard
@@ -560,7 +584,9 @@ function flyCard(
   from: { x: number; y: number },
   to: { x: number; y: number },
   success: boolean,
-  startFaceUp: boolean
+  startFaceUp: boolean,
+  endScale: number = 0.5,
+  onComplete?: () => void
 ) {
   const fly = document.createElement("div")
   fly.className = "flying-card"
@@ -568,37 +594,120 @@ function flyCard(
   fly.style.border = "none"
   fly.style.background = "transparent"
   fly.style.boxShadow = "none"
-  fly.style.left = `${from.x}px`
-  fly.style.top = `${from.y}px`
+  // Start at 0,0 and let transform handle positioning to avoid layout thrashing during animation
+  fly.style.left = "0px"
+  fly.style.top = "0px"
+  fly.style.willChange = "transform"
   document.body.appendChild(fly)
+
+  // --- 1. Calculate Bezier Control Point ---
+  // Midpoint
+  const midX = (from.x + to.x) / 2
+  const midY = (from.y + to.y) / 2
+  // Distance
+  const dx = to.x - from.x
+  const dy = to.y - from.y
+  const dist = Math.sqrt(dx * dx + dy * dy)
+
+  // Offset perpendicular to the path
+  // Normal vector: (-dy, dx) normalized
+  const normalX = -dy / dist
+  const normalY = dx / dist
+
+  // Random arc height (50 to 150px), random direction (left or right arc)
+  const arcHeight = Math.min(150, dist * 0.3) * (Math.random() > 0.5 ? 1 : -1)
+  const cpX = midX + normalX * arcHeight
+  const cpY = midY + normalY * arcHeight
+
+  // --- 2. Generate Keyframes ---
+  const frames = []
+  const steps = 40
+
+  // Random spin
+  const startRotateZ = (Math.random() - 0.5) * 30
+  const endRotateZ = (Math.random() - 0.5) * 30
+
+  // Determine target scale
+  const startScale = 1.0
+  const peakScale = 1.4
+  // endScale is passed as argument
+
+  for (let i = 0; i <= steps; i++) {
+    const t = i / steps
+
+    // Quadratic Bezier: B(t) = (1-t)^2 * P0 + 2(1-t)t * P1 + t^2 * P2
+    const bx = (1 - t) * (1 - t) * from.x + 2 * (1 - t) * t * cpX + t * t * to.x
+    const by = (1 - t) * (1 - t) * from.y + 2 * (1 - t) * t * cpY + t * t * to.y
+
+    // Scale: Parabolic arc for scale (peak at t=0.5)
+    // 4 * (t - t^2) is a parabola 0->1->0
+    // Linear blend is easier for start/end diffs
+    const scaleBase = startScale + (endScale - startScale) * t
+    const scaleBonus =
+      (1 - Math.pow(2 * t - 1, 2)) *
+      (peakScale - Math.max(startScale, endScale))
+    const currentScale = scaleBase + scaleBonus
+
+    // Rotation Z (spin)
+    const currentRotateZ = startRotateZ + (endRotateZ - startRotateZ) * t
+
+    frames.push({
+      transform: `translate(${bx}px, ${by}px) scale(${currentScale}) rotateZ(${currentRotateZ}deg) translate(-50%, -50%)`,
+      zIndex: t > 0.1 && t < 0.9 ? "5000" : "2000", // Ensure it pops over everything in flight
+    })
+  }
+
+  // --- 3. Run Animation ---
+  const animation = fly.animate(frames, {
+    duration: 600,
+    easing: "linear", // Keyframes already handle the curve, linear interpolation between them is fine
+    fill: "forwards",
+  })
+
+  // --- 4. Flip Animation (Inner) ---
+  const inner = fly.firstElementChild as HTMLElement
+
+  // Logic:
+  // If startFaceUp=true, we start at 180deg (showing front).
+  // If we want to land face up, we end at 180deg (or 540deg for extra spin).
+  // If we want to land face down (back), we end at 0deg (or 360deg).
+
+  // Heuristic:
+  // - Success (Collect): Usually lands in hand/pile -> Face down (0deg) or Face up?
+  //   In this game, collected cards go to "player-cards" which show mini-backs. So Face Down.
+  // - Penalty (Center): Moves to center -> Face Up (180deg).
+
   const startRot = startFaceUp ? 180 : 0
-  fly.firstElementChild!.animate(
+  let endRot = 0
+
+  if (success) {
+    // Collecting -> End Face Down (Back visible in stack)
+    // Add extra spins for juice
+    endRot = 360 // 0 equivalent
+  } else {
+    // Penalty / Moving to center -> End Face Up (Front visible)
+    endRot = 180
+  }
+
+  // Add spins if it's a long flight or high energy
+  if (Math.abs(endRot - startRot) < 180) endRot += 360
+
+  inner.animate(
     [
       { transform: `rotateY(${startRot}deg)` },
-      { transform: `rotateY(180deg)`, offset: 0.2 },
-      { transform: `rotateY(180deg)`, offset: 0.8 },
-      { transform: `rotateY(0deg)` },
+      { transform: `rotateY(${endRot}deg)` },
     ],
-    { duration: 700, fill: "forwards" }
+    {
+      duration: 600,
+      easing: "ease-in-out",
+      fill: "forwards",
+    }
   )
-  fly.animate(
-    [
-      {
-        transform: `translate(-50%, -50%) scale(1)`,
-        left: `${from.x}px`,
-        top: `${from.y}px`,
-      },
-      { transform: `translate(-50%, -50%) scale(1.2)`, offset: 0.5 },
-      {
-        transform: `translate(-50%, -50%) scale(0.5)`,
-        left: `${to.x}px`,
-        top: `${to.y}px`,
-      },
-    ],
-    { duration: 700, easing: "cubic-bezier(0.34, 1.56, 0.64, 1)" }
-  ).onfinish = () => {
+
+  animation.onfinish = () => {
     if (success) spawnParticles(to.x, to.y, "#facc15")
     fly.remove()
+    if (onComplete) onComplete()
   }
 }
 

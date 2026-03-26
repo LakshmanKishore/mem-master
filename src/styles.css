@@ -124,7 +124,11 @@ main {
 
 @keyframes pulse {
   0% { transform: translate(-50%, -50%) scale(1); }
-  100% { transform: translate(-50%, -50%) scale(1.15); }
+  15% { transform: translate(-50%, -50%) scale(1.1); }
+  30% { transform: translate(-50%, -50%) scale(1); }
+  45% { transform: translate(-50%, -50%) scale(1.05); }
+  60% { transform: translate(-50%, -50%) scale(1); }
+  100% { transform: translate(-50%, -50%) scale(1); }
 }
 
 /* --- Guess Cards --- */
@@ -150,18 +154,19 @@ main {
 .guess-card:hover { transform: translate(-50%, -50%) scale(1.15) !important; z-index: 30; }
 
 .guess-card.interactive {
-  animation: glow-pulse 1.5s infinite alternate;
+  animation: glow-pulse 2s infinite;
   cursor: pointer;
 }
 
 .guess-card.interactive .card-inner {
   border: 2px solid var(--accent-color);
-  box-shadow: 0 0 15px rgba(250, 204, 21, 0.6);
+  /* box-shadow is handled by glow-pulse on the parent or we can keep it static here */
 }
 
 @keyframes glow-pulse {
-  from { transform: translate(-50%, -50%) scale(1); }
-  to { transform: translate(-50%, -50%) scale(1.08); }
+  0% { transform: translate(-50%, -50%) scale(1); box-shadow: 0 0 0 0 rgba(250, 204, 21, 0.7); }
+  70% { transform: translate(-50%, -50%) scale(1.05); box-shadow: 0 0 20px 10px rgba(250, 204, 21, 0); }
+  100% { transform: translate(-50%, -50%) scale(1); box-shadow: 0 0 0 0 rgba(250, 204, 21, 0); }
 }
 
 .card-inner {
@@ -171,7 +176,7 @@ main {
   box-shadow: 0 4px 0 rgba(0,0,0,0.1);
   position: relative;
   transform-style: preserve-3d;
-  transition: transform 0.6s;
+  transition: transform 0.6s cubic-bezier(0.4, 0.0, 0.2, 1);
   background: white;
 }
 
@@ -538,11 +543,13 @@ main {
   font-size: 60px;
   box-shadow: 0 20px 50px rgba(0,0,0,0.3), 0 0 30px rgba(250, 204, 21, 0.4);
   border: 8px solid var(--accent-color);
-  animation: pop-in 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+  animation: pop-in 0.6s cubic-bezier(0.175, 0.885, 0.32, 1.275);
 }
 
 @keyframes pop-in {
-  0% { transform: scale(0) rotate(-10deg); }
+  0% { transform: scale(0) rotate(-15deg); opacity: 0; }
+  50% { transform: scale(1.2) rotate(5deg); opacity: 1; }
+  70% { transform: scale(0.9) rotate(-3deg); }
   100% { transform: scale(1) rotate(0deg); }
 }
 
@@ -572,8 +579,10 @@ main {
 .shake { animation: shake 0.4s ease-in-out; }
 @keyframes shake {
   0%, 100% { transform: translateX(0); }
-  25% { transform: translateX(-5px) rotate(-5deg); }
-  75% { transform: translateX(5px) rotate(5deg); }
+  20% { transform: translateX(-6px) rotate(-6deg); }
+  40% { transform: translateX(5px) rotate(5deg); }
+  60% { transform: translateX(-3px) rotate(-3deg); }
+  80% { transform: translateX(2px) rotate(2deg); }
 }
 
 .particle {
@@ -581,10 +590,11 @@ main {
   pointer-events: none;
   z-index: 1000;
   border-radius: 50%;
-  animation: particle-fly 0.8s ease-out forwards;
+  /* Animation is handled in JS now */
 }
 
 @keyframes particle-fly {
+  /* Deprecated, handled in JS */
   0% { transform: translate(-50%, -50%) scale(1); opacity: 1; }
   100% { transform: translate(var(--tx), var(--ty)) scale(0); opacity: 0; }
 }
