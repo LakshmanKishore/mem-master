@@ -437,10 +437,23 @@ main {
 }
 
 /* --- Indicators & Overlays --- */
-#turn-indicator {
+#side-indicators {
   position: absolute;
   top: 10px;
   left: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: flex-start;
+  z-index: 500;
+  pointer-events: none;
+}
+
+#side-indicators > * {
+  pointer-events: auto;
+}
+
+#turn-indicator {
   background: white;
   padding: 6px 12px;
   border-radius: 20px;
@@ -448,7 +461,6 @@ main {
   align-items: center;
   gap: 8px;
   box-shadow: var(--shadow-soft);
-  z-index: 500;
   border: 3px solid white;
   max-width: 200px;
 }
@@ -627,9 +639,6 @@ main {
 }
 
 #streak-indicator {
-  position: absolute;
-  top: 60px;
-  left: 10px;
   background: #fff7ed;
   padding: 4px 12px;
   border-radius: 12px;
@@ -641,7 +650,7 @@ main {
   align-items: center;
   gap: 4px;
   box-shadow: var(--shadow-soft);
-  z-index: 500;
+  flex-shrink: 0;
 }
 
 #streak-indicator.hidden { display: none; }
@@ -657,14 +666,9 @@ main {
 }
 
 #powerups-wrapper {
-  position: absolute;
-  top: 100px;
-  left: 10px;
   display: flex;
   flex-direction: column;
   gap: 4px;
-  z-index: 500;
-  pointer-events: auto;
   background: rgba(255, 255, 255, 0.6);
   backdrop-filter: blur(4px);
   padding: 8px;
@@ -672,6 +676,7 @@ main {
   border: 2px solid white;
   box-shadow: var(--shadow-soft);
   min-width: 100px;
+  flex-shrink: 0;
 }
 
 #powerups-wrapper.hidden { display: none; }

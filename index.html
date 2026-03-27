@@ -50,17 +50,21 @@
       <!-- Move UI outside the 3D container so it always works -->
       <div id="ui-layer">
         <div id="round-indicator">ROUND 1</div>
-        <div id="turn-indicator"></div>
-        <button id="help-btn">?</button>
         
-        <div id="streak-indicator" class="hidden">
-          <span class="fire-icon">🔥</span> <span id="streak-count">0</span> STREAK
+        <div id="side-indicators">
+          <div id="turn-indicator"></div>
+          
+          <div id="streak-indicator" class="hidden">
+            <span class="fire-icon">🔥</span> <span id="streak-count">0</span> STREAK
+          </div>
+
+          <div id="powerups-wrapper" class="hidden">
+            <div class="powerups-label">POWER-UPS</div>
+            <div id="powerups-container"></div>
+          </div>
         </div>
 
-        <div id="powerups-wrapper" class="hidden">
-          <div class="powerups-label">POWER-UPS</div>
-          <div id="powerups-container"></div>
-        </div>
+        <button id="help-btn">?</button>
         
         <div id="status-toast"></div>
         <!-- My Hand at the bottom of UI layer -->

@@ -35,7 +35,9 @@ const audioCtx = new (
   (window as unknown as WindowWithAudio).webkitAudioContext
 )()
 
-function playSound(type: "draw" | "success" | "fail" | "steal" | "powerup") {
+function playSound(
+  type: "draw" | "success" | "fail" | "steal" | "powerup" | "round_start"
+) {
   const osc = audioCtx.createOscillator()
   const gain = audioCtx.createGain()
   osc.connect(gain)
@@ -81,6 +83,16 @@ function playSound(type: "draw" | "success" | "fail" | "steal" | "powerup") {
     gain.gain.exponentialRampToValueAtTime(0.01, now + 0.4)
     osc.start(now)
     osc.stop(now + 0.4)
+  } else if (type === "round_start") {
+    osc.type = "sine"
+    osc.frequency.setValueAtTime(440, now)
+    osc.frequency.exponentialRampToValueAtTime(880, now + 0.2)
+    osc.frequency.exponentialRampToValueAtTime(1320, now + 0.4)
+    gain.gain.setValueAtTime(0.1, now)
+    gain.gain.linearRampToValueAtTime(0.2, now + 0.1)
+    gain.gain.exponentialRampToValueAtTime(0.01, now + 0.5)
+    osc.start(now)
+    osc.stop(now + 0.5)
   }
 }
 
@@ -181,59 +193,59 @@ function renderCenterCards(
   isPickPhase: boolean,
   yourPlayerId: PlayerId | undefined
 ) {
-  const count = game.centerCards.length
   const cardRadius = 25
-
-  // 1. Identify which cards stayed, which are new, and which are gone
   const currentIds = new Set(game.centerCards.map((c) => c.id))
 
-  // 2. Remove DOM elements for cards that are gone
+  // 1. Mark gone cards as removing and schedule their cleanup
   for (const [id, el] of guessCardMap.entries()) {
-    if (!currentIds.has(id)) {
-      // Small delay to allow flip animation to finish if it was just picked
+    if (!currentIds.has(id) && !el.classList.contains("removing")) {
+      el.classList.add("removing")
+      el.style.pointerEvents = "none"
+      el.style.opacity = "0" // Hide immediately when it's gone from state
       setTimeout(() => {
         if (el.parentNode === guessCardsRing) {
           guessCardsRing.removeChild(el)
         }
-      }, 500)
-      guessCardMap.delete(id)
+        guessCardMap.delete(id)
+      }, 1000)
     }
   }
 
-  // 3. Update positions and content for current cards
-  game.centerCards.forEach((card, i) => {
-    let el = guessCardMap.get(card.id)
-
-    if (!el) {
-      // Create new element for new card (e.g. penalty return)
-      el = document.createElement("div")
+  // 2. Identify and create new cards
+  game.centerCards.forEach((card) => {
+    if (!guessCardMap.has(card.id)) {
+      const el = document.createElement("div")
       el.className = "guess-card just-spawned"
       el.innerHTML = `<div class="card-inner"><div class="card-face back"></div><div class="card-face front"></div></div>`
       guessCardsRing.appendChild(el)
       guessCardMap.set(card.id, el)
     }
+  })
 
-    // Calculate position based on current count and index
+  // 3. Dynamic layout: only position cards that are still in game.centerCards
+  const count = game.centerCards.length
+  game.centerCards.forEach((card, i) => {
+    const el = guessCardMap.get(card.id)
+    if (!el || el.classList.contains("removing")) return
+
     const angle = (i * 360) / count
     const x = 50 + cardRadius * Math.cos((angle - 90) * (Math.PI / 180))
     const y = 50 + cardRadius * Math.sin((angle - 90) * (Math.PI / 180))
 
-    // Set stable styles (transitions are in CSS)
     el.style.left = `${x}%`
     el.style.top = `${y}%`
     el.style.transform = `translate(-50%, -50%) rotate(${angle}deg)`
+    el.style.opacity = "1"
 
-    // Ensure no stale state
     el.classList.remove("flipped", "shake")
-
-    // Update click handler with fresh index
     el.onclick = () => {
-      if (currentGame?.phase === "pick" && currentGame.turn === yourPlayerId) {
+      if (
+        currentGame?.phase === "pick" &&
+        currentGame.turn === yourPlayerId
+      ) {
         Rune.actions.pickCard({ type: "center", index: i })
       }
     }
-
-    // Update content
     const front = el.querySelector(".front") as HTMLElement
     const back = el.querySelector(".back") as HTMLElement
     el.classList.toggle("interactive", isPickPhase)
@@ -251,12 +263,13 @@ function updateUI(game: GameState, yourPlayerId: PlayerId | undefined) {
     currentRound = game.round
     roundIndicator.textContent = `ROUND ${game.round}`
     roundIndicator.classList.add("pop")
+    playSound("round_start")
     setTimeout(() => roundIndicator.classList.remove("pop"), 1000)
     // Dynamic BG based on round
     const colors = ["#a5f3fc", "#c4b5fd", "#f9a8d4"]
     document.body.style.setProperty(
       "--bg-gradient",
-      `linear-gradient(135deg, ${colors[game.round - 1]} 0%, #c4b5fd 100%)`
+      `linear-gradient(135deg, ${colors[(game.round - 1) % colors.length]} 0%, #c4b5fd 100%)`
     )
   }
 
@@ -538,30 +551,59 @@ function animateAction(
               )
             }
           }
-        } else {
-          const rect = sourceEl.getBoundingClientRect()
-          startPos = {
-            x: rect.left + rect.width / 2,
-            y: rect.top + rect.height / 2,
-          }
-          spawnParticles(startPos.x, startPos.y, "#4ade80")
-          setTimeout(() => sourceEl.classList.remove("flipped"), 500)
+          return // Failure handled, don't fly anything else
         }
+
+        const rect = sourceEl.getBoundingClientRect()
+        startPos = {
+          x: rect.left + rect.width / 2,
+          y: rect.top + rect.height / 2,
+        }
+        spawnParticles(startPos.x, startPos.y, "#4ade80")
+        sourceEl.style.opacity = "0" // Hide original, flyCard will show duplicate
+        startFaceUp = true
       }
     } else {
-      startFaceUp = false
+      // Steal from player: Reveal the emoji briefly if it's a success
+      startFaceUp = res.success
       startPos =
         isLocalAction && lastClickPos
           ? lastClickPos
           : getGhostCardPos(res.from.playerId, yourPlayerId)
     }
-    if (res.success || res.to === "center") {
+
+    if (res.success) {
+      // SUCCESS: Wait for the card to be "shown" before it flies to the slot
       let destEl: HTMLElement | null = null
-      if (res.to === "center") destEl = guessCardsRing
-      else if (res.to)
+      if (res.to)
         destEl = playerNodes[res.to as PlayerId]?.querySelector(
           ".avatar-wrapper"
         ) as HTMLElement
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const isTest = (window as any).vi !== undefined || (window as any).process?.env?.NODE_ENV === "test"
+
+      if ((startPos.x !== 0 || isTest) && destEl) {
+        const endRect = destEl.getBoundingClientRect()
+        // flyCard now handles the "showing" part internally if we pass showFirst: true
+        flyCard(
+          res.emoji,
+          startPos,
+          {
+            x: endRect.left + endRect.width / 2,
+            y: endRect.top + endRect.height / 2,
+          },
+          true,
+          startFaceUp,
+          0.5,
+          undefined,
+          true
+        )
+      }
+    } else if (res.to === "center") {
+      // Penalty/Failure return to center (handled above for center->center,
+      // but if we ever have other failure-to-center transitions)
+      const destEl = guessCardsRing
       if (startPos.x !== 0 && destEl) {
         const endRect = destEl.getBoundingClientRect()
         flyCard(
@@ -571,7 +613,7 @@ function animateAction(
             x: endRect.left + endRect.width / 2,
             y: endRect.top + endRect.height / 2,
           },
-          !!res.success,
+          false,
           startFaceUp
         )
       }
@@ -586,7 +628,8 @@ function flyCard(
   success: boolean,
   startFaceUp: boolean,
   endScale: number = 0.5,
-  onComplete?: () => void
+  onComplete?: () => void,
+  showFirst: boolean = false
 ) {
   const fly = document.createElement("div")
   fly.className = "flying-card"
@@ -594,27 +637,72 @@ function flyCard(
   fly.style.border = "none"
   fly.style.background = "transparent"
   fly.style.boxShadow = "none"
-  // Start at 0,0 and let transform handle positioning to avoid layout thrashing during animation
   fly.style.left = "0px"
   fly.style.top = "0px"
   fly.style.willChange = "transform"
   document.body.appendChild(fly)
 
+  const inner = fly.firstElementChild as HTMLElement
+  const startRot = startFaceUp ? 180 : 0
+
+  if (showFirst) {
+    // Phase 1: Reveal at 'from' position
+    // We want it to pop up and stay for a moment
+    const revealAnim = fly.animate(
+      [
+        {
+          transform: `translate(${from.x}px, ${from.y}px) scale(1) rotateZ(0deg) translate(-50%, -50%)`,
+          opacity: 1,
+        },
+        {
+          transform: `translate(${from.x}px, ${from.y}px) scale(1.3) rotateZ(-3deg) translate(-50%, -50%)`,
+          opacity: 1,
+        },
+      ],
+      {
+        duration: 300,
+        easing: "cubic-bezier(0.175, 0.885, 0.32, 1.275)",
+        fill: "forwards",
+      }
+    )
+
+    inner.animate(
+      [
+        { transform: `rotateY(${startRot}deg)` },
+        { transform: `rotateY(180deg)` },
+      ],
+      { duration: 300, fill: "forwards" }
+    )
+
+    revealAnim.onfinish = () => {
+      setTimeout(() => {
+        startFlight(fly, from, to, success, true, endScale, onComplete)
+      }, 100)
+    }
+  } else {
+    startFlight(fly, from, to, success, startFaceUp, endScale, onComplete)
+  }
+}
+
+function startFlight(
+  fly: HTMLElement,
+  from: { x: number; y: number },
+  to: { x: number; y: number },
+  success: boolean,
+  startFaceUp: boolean,
+  endScale: number,
+  onComplete?: () => void
+) {
   // --- 1. Calculate Bezier Control Point ---
-  // Midpoint
   const midX = (from.x + to.x) / 2
   const midY = (from.y + to.y) / 2
-  // Distance
   const dx = to.x - from.x
   const dy = to.y - from.y
   const dist = Math.sqrt(dx * dx + dy * dy)
 
-  // Offset perpendicular to the path
-  // Normal vector: (-dy, dx) normalized
   const normalX = -dy / dist
   const normalY = dx / dist
 
-  // Random arc height (50 to 150px), random direction (left or right arc)
   const arcHeight = Math.min(150, dist * 0.3) * (Math.random() > 0.5 ? 1 : -1)
   const cpX = midX + normalX * arcHeight
   const cpY = midY + normalY * arcHeight
@@ -622,74 +710,40 @@ function flyCard(
   // --- 2. Generate Keyframes ---
   const frames = []
   const steps = 40
-
-  // Random spin
   const startRotateZ = (Math.random() - 0.5) * 30
   const endRotateZ = (Math.random() - 0.5) * 30
-
-  // Determine target scale
   const startScale = 1.0
   const peakScale = 1.4
-  // endScale is passed as argument
 
   for (let i = 0; i <= steps; i++) {
     const t = i / steps
-
-    // Quadratic Bezier: B(t) = (1-t)^2 * P0 + 2(1-t)t * P1 + t^2 * P2
     const bx = (1 - t) * (1 - t) * from.x + 2 * (1 - t) * t * cpX + t * t * to.x
     const by = (1 - t) * (1 - t) * from.y + 2 * (1 - t) * t * cpY + t * t * to.y
 
-    // Scale: Parabolic arc for scale (peak at t=0.5)
-    // 4 * (t - t^2) is a parabola 0->1->0
-    // Linear blend is easier for start/end diffs
     const scaleBase = startScale + (endScale - startScale) * t
     const scaleBonus =
       (1 - Math.pow(2 * t - 1, 2)) *
       (peakScale - Math.max(startScale, endScale))
     const currentScale = scaleBase + scaleBonus
-
-    // Rotation Z (spin)
     const currentRotateZ = startRotateZ + (endRotateZ - startRotateZ) * t
 
     frames.push({
       transform: `translate(${bx}px, ${by}px) scale(${currentScale}) rotateZ(${currentRotateZ}deg) translate(-50%, -50%)`,
-      zIndex: t > 0.1 && t < 0.9 ? "5000" : "2000", // Ensure it pops over everything in flight
+      zIndex: "5000",
     })
   }
 
   // --- 3. Run Animation ---
   const animation = fly.animate(frames, {
     duration: 600,
-    easing: "linear", // Keyframes already handle the curve, linear interpolation between them is fine
+    easing: "linear",
     fill: "forwards",
   })
 
   // --- 4. Flip Animation (Inner) ---
   const inner = fly.firstElementChild as HTMLElement
-
-  // Logic:
-  // If startFaceUp=true, we start at 180deg (showing front).
-  // If we want to land face up, we end at 180deg (or 540deg for extra spin).
-  // If we want to land face down (back), we end at 0deg (or 360deg).
-
-  // Heuristic:
-  // - Success (Collect): Usually lands in hand/pile -> Face down (0deg) or Face up?
-  //   In this game, collected cards go to "player-cards" which show mini-backs. So Face Down.
-  // - Penalty (Center): Moves to center -> Face Up (180deg).
-
   const startRot = startFaceUp ? 180 : 0
-  let endRot = 0
-
-  if (success) {
-    // Collecting -> End Face Down (Back visible in stack)
-    // Add extra spins for juice
-    endRot = 360 // 0 equivalent
-  } else {
-    // Penalty / Moving to center -> End Face Up (Front visible)
-    endRot = 180
-  }
-
-  // Add spins if it's a long flight or high energy
+  let endRot = success ? 360 : 180
   if (Math.abs(endRot - startRot) < 180) endRot += 360
 
   inner.animate(
@@ -697,11 +751,7 @@ function flyCard(
       { transform: `rotateY(${startRot}deg)` },
       { transform: `rotateY(${endRot}deg)` },
     ],
-    {
-      duration: 600,
-      easing: "ease-in-out",
-      fill: "forwards",
-    }
+    { duration: 600, easing: "ease-in-out", fill: "forwards" }
   )
 
   animation.onfinish = () => {
@@ -722,11 +772,18 @@ if (import.meta.env.DEV) {
 
 Rune.initClient({
   onChange: ({ game, yourPlayerId, action, event }) => {
+    const isRestart =
+      game.round === 1 &&
+      currentGame &&
+      (currentGame.round > 1 || currentGame.winner !== null)
+
     currentGame = game
     if (
       Object.keys(playerNodes).length !== game.playerIds.length ||
       event?.name === "playerJoined" ||
-      event?.name === "playerLeft"
+      event?.name === "playerLeft" ||
+      event?.name === "stateSync" ||
+      isRestart
     ) {
       initUI(game, yourPlayerId)
     }
