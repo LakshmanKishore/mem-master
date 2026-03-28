@@ -239,10 +239,7 @@ function renderCenterCards(
 
     el.classList.remove("flipped", "shake")
     el.onclick = () => {
-      if (
-        currentGame?.phase === "pick" &&
-        currentGame.turn === yourPlayerId
-      ) {
+      if (currentGame?.phase === "pick" && currentGame.turn === yourPlayerId) {
         Rune.actions.pickCard({ type: "center", index: i })
       }
     }
@@ -580,8 +577,10 @@ function animateAction(
           ".avatar-wrapper"
         ) as HTMLElement
 
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const isTest = (window as any).vi !== undefined || (window as any).process?.env?.NODE_ENV === "test"
+      const isTest =
+        (window as unknown as { vi?: unknown }).vi !== undefined ||
+        (window as unknown as { process?: { env?: { NODE_ENV?: string } } })
+          .process?.env?.NODE_ENV === "test"
 
       if ((startPos.x !== 0 || isTest) && destEl) {
         const endRect = destEl.getBoundingClientRect()
